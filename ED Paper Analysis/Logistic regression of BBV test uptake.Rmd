@@ -1,0 +1,779 @@
+---
+title: "Logistic Regression Test Uptake"
+author: "Olaide Adebayo-Clement"
+date: "2024-05-20"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls(all.names = TRUE))
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  error = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 16.00,
+  fig.height = 13.00,
+  fig.align = 'center',
+  fig.topcaption = TRUE,
+  out.width = '100%',
+  out.height = 'auto'
+)
+
+if (!requireNamespace("pacman", quietly = TRUE)) install.packages("pacman")
+
+pacman::p_load(
+  tidyverse, readxl, DBI, dplyr, odbc, janitor, gtsummary,
+  scales, gt, purrr, broom, here, readr, car, MASS, mice,
+  forestplot, stringr, tidyr, ggplot2, grid, gridExtra,
+  ggpubr, stats, parallel, data.table, forcats, epiR,
+  rpart, conflicted, doparallel, foreach, openxlsx,
+  caret, pROC, lme4, glmmTMB, broom.mixed, geepack
+)
+
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::recode)
+```
+
+```{r database-connection}
+db_conn <- odbc::dbConnect(
+  odbc::odbc(),
+  .connection_string = "driver={SQL Server};server=DB_SERVER;database=ANALYSIS_DB;Encrypt=true;trusted_connection=true",
+  timeout = 60,
+  timezone = Sys.timezone(),
+  timezone_out = Sys.timezone()
+)
+```
+
+```{r data-preparation}
+load_service_data <- function(conn, service_type) {
+  query <- sprintf(
+    "SELECT *, Location AS location_code
+    FROM [ANALYSIS_DB].[dbo].[service_utilization_%s]
+    WHERE (service_date <= '2024-03-31')",
+    service_type
+  )
+  dbGetQuery(conn, query)
+}
+
+included_locations <- c('LOC001', 'LOC002', 'LOC003', 'LOC004', 'LOC005', 
+                       'LOC006', 'LOC007', 'LOC008', 'LOC009', 'LOC010', 
+                       'LOC011', 'LOC012', 'LOC013', 'LOC014', 'LOC015', 'LOC016')
+
+clean_data <- function(data, location_col) {
+  data %>%
+    mutate(
+      socioeconomic_index = if_else(is.na(socioeconomic_index), "Unknown", as.character(socioeconomic_index)),
+      gender = if_else(is.na(sex), "Unknown", sex),
+      demographic_group = if_else(
+        is.na(demographic_group) | demographic_group == "Unknown",
+        "Unknown Group",
+        demographic_group
+      ),
+      age_group = case_when(
+        age < 25 ~ "16-24",
+        age >= 25 & age < 35 ~ "25-34",
+        age >= 35 & age < 50 ~ "35-49",
+        age >= 50 & age < 65 ~ "50-64",
+        age >= 65 & age < 80 ~ "65-79",
+        age >= 80 ~ "80 and over",
+        TRUE ~ NA_character_
+      ),
+      Location = as.character(!!sym(location_col))
+    ) %>%
+    filter(
+      socioeconomic_index != "Unknown",
+      gender != "Unknown",
+      demographic_group != "Unknown Group",
+      !is.na(age_group),
+      !is.na(visit_count),
+      Location %in% included_locations
+    ) %>%
+    mutate(
+      gender = case_when(
+        gender == "MALE" ~ "Men",
+        gender == "FEMALE" ~ "Women",
+        TRUE ~ gender
+      ),
+      age_group = str_replace_all(age_group, "-", " to "),
+      age_group = str_replace_all(age_group, "80\\+", "80 and over"),
+      age_group = str_replace_all(age_group, "(\\d+)(to)(\\d+)", "\\1 to \\3")
+    )
+}
+
+service_a_data <- clean_data(load_service_data(db_conn, "type_a"), "Location")
+service_b_data <- clean_data(load_service_data(db_conn, "type_b"), "Location")
+service_c_data <- clean_data(load_service_data(db_conn, "type_c"), "Location")
+```
+
+```{r create-analysis-datasets}
+create_analysis_dataset <- function(data, service_type) {
+  data %>%
+    mutate(
+      service_test = case_when(
+        lab_test == "Yes" & service_provided == "Yes" ~ 1,
+        lab_test == "Yes" & (is.na(service_provided) | service_provided != "Yes") ~ 0,
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    filter(!is.na(service_test)) %>%
+    dplyr::select(
+      participant_id, service_test,
+      age_group, gender, demographic_group, socioeconomic_index, Location, visit_count
+    )
+}
+
+service_a_analysis <- create_analysis_dataset(service_a_data, "type_a")
+service_b_analysis <- create_analysis_dataset(service_b_data, "type_b")
+service_c_analysis <- create_analysis_dataset(service_c_data, "type_c")
+
+write.csv(service_a_analysis, "service_a_analysis.csv", row.names = FALSE)
+write.csv(service_b_analysis, "service_b_analysis.csv", row.names = FALSE)
+write.csv(service_c_analysis, "service_c_analysis.csv", row.names = FALSE)
+```
+
+```{r regression-setup}
+reorder_factors <- function(data) {
+  data %>%
+    mutate(
+      age_group = fct_relevel(as.factor(age_group), "35 to 49"),
+      gender = fct_relevel(as.factor(gender), "Women"),
+      demographic_group = fct_relevel(as.factor(demographic_group), "Group A"),
+      Location = fct_relevel(as.factor(Location), "LOC001"),
+      socioeconomic_index = fct_relevel(as.factor(socioeconomic_index), "1"),
+      visit_count = fct_relevel(as.factor(visit_count), "1")
+    )
+}
+
+reference_groups_uni <- data.frame(
+  term = c("age_group 35 to 49 (reference)",
+           "gender Women (reference)",
+           "demographic_group Group A (reference)",
+           "socioeconomic_index 1 (reference)",
+           "Location LOC001 (reference)",
+           "visit_count 1 (reference)")
+)
+
+calculate_odds_ratio <- function(sub_table) {
+  or <- (sub_table[1, 1] * sub_table[2, 2]) / (sub_table[1, 2] * sub_table[2, 1])
+  return(or)
+}
+
+univariable_analysis <- function(df, outcome, reference_groups) {
+  predictor_vars <- c("age_group", "gender", "demographic_group", 
+                     "socioeconomic_index", "Location", "visit_count")
+  
+  results <- lapply(predictor_vars, function(var) {
+    formula <- as.formula(paste(outcome, "~", var))
+    model <- glm(formula, data = df, family = binomial)
+    
+    coef_summary <- summary(model)$coefficients
+    odds_ratios <- exp(coef_summary[, "Estimate"])
+    p_values <- coef_summary[, "Pr(>|z|)"]
+    
+    odds_ratios[1] <- 1
+    
+    chi_sq <- anova(model, test = "Chisq")
+    chi_sq_value <- chi_sq[2, "Deviance"]
+    p_value <- chi_sq[2, "Pr(>Chi)"]
+    
+    table <- table(df[[var]], df[[outcome]])
+    percentages <- prop.table(table, margin = 1) * 100
+    combined <- cbind(table, round(percentages, 1))
+    colnames(combined) <- c("No", "Yes", "No_%", "Yes_%")
+    
+    reference <- reference_groups_uni$term[grepl(var, reference_groups_uni$term)]
+    
+    detailed_results <- data.frame(
+      Variable = var,
+      Subgroup = rownames(combined),
+      No = combined[,"No"],
+      Yes = combined[,"Yes"],
+      No_Percent = combined[,"No_%"],
+      Yes_Percent = combined[,"Yes_%"],
+      Chi2 = chi_sq_value,
+      p_value_univariable = p_value,
+      Odds_Ratio = odds_ratios,
+      Reference_Group = reference
+    ) %>%
+      filter(Subgroup != "(Intercept)")
+    
+    return(detailed_results)
+  })
+  
+  do.call(rbind, results)
+}
+
+logistic_regression <- function(df, outcome) {
+  model <- glm(as.formula(paste(outcome, 
+    "~ age_group + gender + demographic_group + socioeconomic_index + Location + visit_count")),
+    data = df, family = binomial)
+  
+  coef_summary <- summary(model)$coefficients
+  ci <- confint.default(model)
+  
+  tidy_model <- data.frame(
+    term = rownames(coef_summary),
+    OR = exp(coef_summary[, "Estimate"]),
+    CI_lower = exp(ci[, 1]),
+    CI_upper = exp(ci[, 2]),
+    p.value_multivariable = coef_summary[, "Pr(>|z|)"]
+  ) %>%
+    filter(term != "(Intercept)")
+  
+  return(tidy_model)
+}
+```
+
+
+
+```{r multilevel-regression-analysis}
+# Basic Model Analysis
+# Load dataset
+df_main <- read_csv("service_analysis.csv")
+
+# Ensure factors are properly set
+df_main$location <- as.factor(df_main$location)
+df_main$visit_count <- as.numeric(as.character(df_main$visit_count))
+df_main$service_test <- as.numeric(as.character(df_main$service_test))
+
+# Create visit categories
+df_main <- df_main %>%
+  mutate(
+    visit_count_cat = case_when(
+      visit_count == 1 ~ "1",
+      visit_count == 2 ~ "2",
+      visit_count >= 3 & visit_count <= 5 ~ "3-5",
+      visit_count >= 6 & visit_count <= 10 ~ "6-10",
+      visit_count >= 11 ~ "11+"
+    )
+  ) %>%
+  mutate(visit_count_cat = factor(visit_count_cat, 
+                                 levels = c("1", "2", "3-5", "6-10", "11+")))
+
+# Set reference levels
+df_main <- df_main %>%
+  mutate(
+    age_group = fct_relevel(as.factor(age_group), "35 to 49"),
+    gender = fct_relevel(as.factor(gender), "Primary"),
+    demographic_group = fct_relevel(as.factor(demographic_group), "Group A"),
+    socioeconomic_index = fct_relevel(as.factor(socioeconomic_index), "1"),
+    visit_count_cat = fct_relevel(as.factor(visit_count_cat), "1")
+  )
+
+# Fit base mixed model
+mixed_model <- glmer(
+  service_test ~ age_group + gender + demographic_group + 
+    socioeconomic_index + visit_count_cat + (1 | location),
+  data = df_main,
+  family = binomial,
+  nAGQ = 0
+)
+
+# Process results
+tidy_mixed_model <- broom.mixed::tidy(
+  mixed_model,
+  conf.int = TRUE,
+  conf.method = "Wald",
+  effects = "fixed"
+) %>%
+  mutate(
+    OR = exp(estimate),
+    OR_lower = exp(conf.low),
+    OR_upper = exp(conf.high)
+  )
+
+# Gender-Specific Analysis
+# Fit model with random slopes for gender
+mixed_model_gender <- glmer(
+  service_test ~ age_group + gender + demographic_group + 
+    socioeconomic_index + visit_count_cat + (1 + gender | location),
+  data = df_main,
+  family = binomial,
+  nAGQ = 0,
+  control = glmerControl(optimizer = "bobyqa", 
+                        optCtrl = list(maxfun = 1e5))
+)
+
+# Extract gender-specific results
+gender_results <- broom.mixed::tidy(
+  mixed_model_gender,
+  conf.int = TRUE,
+  conf.method = "Wald",
+  effects = "fixed"
+) %>%
+  mutate(
+    OR = exp(estimate),
+    OR_lower = exp(conf.low),
+    OR_upper = exp(conf.high)
+  )
+
+# Age Group Analysis
+# Create age group indicators
+df_main <- df_main %>%
+  mutate(
+    age_16_24 = as.numeric(age_group == "16 to 24"),
+    age_25_34 = as.numeric(age_group == "25 to 34"),
+    age_50_64 = as.numeric(age_group == "50 to 64"),
+    age_65_79 = as.numeric(age_group == "65 to 79"),
+    age_80plus = as.numeric(age_group == "80 and over")
+  )
+
+# Fit age group model
+mixed_model_age <- glmer(
+  service_test ~ age_group + gender + demographic_group + 
+    socioeconomic_index + visit_count_cat + 
+    (1 + age_16_24 + age_25_34 + age_50_64 + 
+     age_65_79 + age_80plus || location),
+  data = df_main,
+  family = binomial,
+  nAGQ = 0,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 1e5),
+    calc.derivs = FALSE
+  )
+)
+
+# Process age group results
+age_random_effects <- ranef(mixed_model_age)$location
+age_variations <- data.frame(
+  location = rownames(age_random_effects),
+  Intercept = age_random_effects[,1],
+  Effect_16_24 = age_random_effects[,2],
+  Effect_25_34 = age_random_effects[,3],
+  Effect_50_64 = age_random_effects[,4],
+  Effect_65_79 = age_random_effects[,5],
+  Effect_80plus = age_random_effects[,6]
+)
+
+# Socioeconomic Analysis
+# Create index indicators
+df_main <- df_main %>%
+  mutate(
+    index_2 = as.numeric(socioeconomic_index == "2"),
+    index_3 = as.numeric(socioeconomic_index == "3"),
+    index_4 = as.numeric(socioeconomic_index == "4"),
+    index_5 = as.numeric(socioeconomic_index == "5")
+  )
+
+# Fit socioeconomic model
+mixed_model_socioeconomic <- glmer(
+  service_test ~ socioeconomic_index + gender + age_group + 
+    demographic_group + visit_count_cat + 
+    (1 + index_2 + index_3 + index_4 + index_5 || location),
+  data = df_main,
+  family = binomial,
+  nAGQ = 0,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 1e5),
+    calc.derivs = FALSE
+  )
+)
+
+# Demographic Group Analysis
+# Create demographic indicators
+df_main <- df_main %>%
+  mutate(
+    group_b = as.numeric(demographic_group == "Group B"),
+    group_c = as.numeric(demographic_group == "Group C"),
+    group_d = as.numeric(demographic_group == "Group D"),
+    group_e = as.numeric(demographic_group == "Group E"),
+    group_f = as.numeric(demographic_group == "Group F"),
+    group_g = as.numeric(demographic_group == "Group G"),
+    group_h = as.numeric(demographic_group == "Group H"),
+    group_i = as.numeric(demographic_group == "Group I")
+  )
+
+# Fit demographic model
+mixed_model_demographic <- glmer(
+  service_test ~ demographic_group + gender + age_group + 
+    socioeconomic_index + visit_count_cat + 
+    (1 + group_b + group_c + group_d + group_e + 
+     group_f + group_g + group_h + group_i || location),
+  data = df_main,
+  family = binomial,
+  nAGQ = 0,
+  control = glmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 1e5),
+    calc.derivs = FALSE
+  )
+)
+
+# Process demographic results
+demographic_random_effects <- ranef(mixed_model_demographic)$location
+demographic_variations <- data.frame(
+  location = rownames(demographic_random_effects),
+  Intercept = demographic_random_effects[,1],
+  Effect_Group_B = demographic_random_effects[,2],
+  Effect_Group_C = demographic_random_effects[,3],
+  Effect_Group_D = demographic_random_effects[,4],
+  Effect_Group_E = demographic_random_effects[,5],
+  Effect_Group_F = demographic_random_effects[,6],
+  Effect_Group_G = demographic_random_effects[,7],
+  Effect_Group_H = demographic_random_effects[,8],
+  Effect_Group_I = demographic_random_effects[,9]
+)
+
+# Generate Visualizations
+# Forest plot for main effects
+forest_plot_main <- ggplot(
+  tidy_mixed_model %>% 
+    filter(term != "(Intercept)" & !str_detect(term, "^visit_count_cat")),
+  aes(x = OR, y = term)
+) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = OR_lower, xmax = OR_upper), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  xlab("Odds Ratio") +
+  ylab("Predictor Variables") +
+  ggtitle("Forest Plot of Mixed Effects Results") +
+  theme_pubr() +
+  theme(axis.text.y = element_text(hjust = 1, size = 10))
+
+# Save results
+write.csv(tidy_mixed_model, "mixed_model_results.csv", row.names = FALSE)
+write.csv(demographic_variations, "demographic_variations.csv", row.names = FALSE)
+write.csv(age_variations, "age_variations.csv", row.names = FALSE)
+
+ggsave("forest_plot_main.png", plot = forest_plot_main, width = 10, height = 8)
+
+# Plot random effects
+random_effects_plot <- dotplot(ranef(mixed_model, condVar = TRUE), 
+                             main = "Random Effects by Location")
+ggsave("random_effects.png", plot = random_effects_plot, width = 10, height = 6)
+
+```
+
+
+
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(ggpubr)
+library(caret)
+library(pROC)
+library(stats)
+
+#######################################
+# Part 1: Analysis for Outcome A
+#######################################
+
+# Load and prepare the dataset
+df_outcome_a <- read_csv("outcome_a_data.csv")
+df_outcome_a <- reorder_factors(df_outcome_a)
+
+# Univariable analysis
+uni_results_a <- univariable_analysis(df_outcome_a, "outcome_a", reference_groups_uni)
+uni_results_a <- uni_results_a %>%
+  mutate(across(where(is.numeric), round, 3))
+
+# Save univariable results table
+table_grob_a_univariable <- tableGrob(uni_results_a, rows = NULL)
+ggsave("results_table_outcome_a_univariable.png", 
+       plot = table_grob_a_univariable, 
+       width = 15, 
+       height = 14)
+
+# Perform logistic regression
+logit_results_a <- logistic_regression(df_outcome_a, "outcome_a")
+
+# Define reference groups
+reference_groups <- data.frame(
+  term = c("age_category_3 (reference)", 
+           "sex_category_1 (reference)", 
+           "demographic_group_1 (reference)", 
+           "social_index_1 (reference)", 
+           "location_1 (reference)",
+           "visit_count_1 (reference)"),
+  OR = NA, 
+  CI_lower = NA, 
+  CI_upper = NA, 
+  p.value_multivariable = NA
+)
+
+# Combine results with reference groups
+combined_results_a <- bind_rows(reference_groups, logit_results_a) %>%
+  mutate(term = make.unique(as.character(term))) %>%
+  distinct(term, .keep_all = TRUE) %>%
+  mutate(across(where(is.numeric), round, 3))
+
+# Print results
+print("Results for Outcome A")
+print(combined_results_a)
+
+# Save multivariable results table
+table_grob_a <- tableGrob(combined_results_a, rows = NULL)
+ggsave("results_table_outcome_a_multivariable.png", 
+       plot = table_grob_a, 
+       width = 10, 
+       height = 16)
+
+# Prepare and create forest plot
+forest_plot_data <- combined_results_a %>%
+  dplyr::filter(!str_detect(term, "^location")) %>%
+  dplyr::filter(!str_detect(term, "^visit_count")) %>%
+  dplyr::filter(!str_detect(term, "^Intercept|NA")) %>%
+  mutate(term = case_when(
+    term == "social_index_1" ~ "Social Index Level 1",
+    term == "social_index_2" ~ "Social Index Level 2",
+    term == "social_index_3" ~ "Social Index Level 3",
+    term == "social_index_4" ~ "Social Index Level 4",
+    term == "social_index_5" ~ "Social Index Level 5",
+    term == "sex_category_1" ~ "Sex Category 1 (reference)",
+    term == "sex_category_2" ~ "Sex Category 2",
+    term == "demographic_group_1" ~ "Demographic Group 1 (reference)",
+    term == "demographic_group_2" ~ "Demographic Group 2",
+    term == "demographic_group_3" ~ "Demographic Group 3",
+    term == "demographic_group_4" ~ "Demographic Group 4",
+    term == "demographic_group_5" ~ "Demographic Group 5",
+    term == "demographic_group_6" ~ "Demographic Group 6",
+    term == "demographic_group_7" ~ "Demographic Group 7",
+    term == "demographic_group_8" ~ "Demographic Group 8",
+    term == "demographic_group_9" ~ "Demographic Group 9",
+    term == "age_category_1" ~ "Age Category 1",
+    term == "age_category_2" ~ "Age Category 2",
+    term == "age_category_3" ~ "Age Category 3 (reference)",
+    term == "age_category_4" ~ "Age Category 4",
+    term == "age_category_5" ~ "Age Category 5",
+    term == "age_category_6" ~ "Age Category 6",
+    TRUE ~ term
+  ))
+
+forest_plot_a <- ggplot(forest_plot_data, aes(x = OR, y = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = CI_lower, xmax = CI_upper)) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  xlab("Odds Ratio") +
+  ylab("Predictor Variables") +
+  ggtitle("Forest Plot of Outcome A Logistic Regression Results") +
+  theme_pubr() +
+  theme(axis.text.y = element_text(hjust = 1, size = 10))
+
+ggsave("forest_plot_outcome_a.png", 
+       plot = forest_plot_a, 
+       width = 10, 
+       height = 8)
+
+#######################################
+# Part 2: Analysis for Outcome B
+#######################################
+
+# Load and prepare the dataset
+df_outcome_b <- read_csv("outcome_b_data.csv")
+df_outcome_b <- reorder_factors(df_outcome_b)
+
+# Univariable analysis
+uni_results_b <- univariable_analysis(df_outcome_b, "outcome_b", reference_groups_uni)
+uni_results_b <- uni_results_b %>%
+  mutate(across(where(is.numeric), round, 3))
+
+# Save univariable results table
+table_grob_b_univariable <- tableGrob(uni_results_b, rows = NULL)
+ggsave("results_table_outcome_b_univariable.png", 
+       plot = table_grob_b_univariable, 
+       width = 15, 
+       height = 14)
+
+# Perform logistic regression and combine results
+logit_results_b <- logistic_regression(df_outcome_b, "outcome_b")
+combined_results_b <- bind_rows(reference_groups, logit_results_b) %>%
+  mutate(term = make.unique(as.character(term))) %>%
+  distinct(term, .keep_all = TRUE) %>%
+  mutate(
+    CI_lower = as.numeric(CI_lower),
+    CI_upper = as.numeric(CI_upper)
+  ) %>%
+  mutate(across(where(is.numeric) & !matches("CI_upper"), round, 3),
+         CI_upper = round(CI_upper, 3)
+  )
+
+# Print results
+print("Results for Outcome B")
+print(combined_results_b)
+
+# Save multivariable results table
+table_grob_b <- tableGrob(combined_results_b, rows = NULL)
+ggsave("results_table_outcome_b_multivariable.png", 
+       plot = table_grob_b, 
+       width = 10, 
+       height = 16)
+
+#######################################
+# Part 3: Nested Analysis
+#######################################
+
+# Load dataset
+df_outcome_c <- read_csv("outcome_c_data.csv")
+
+# Fit base and extended models
+model_base <- glm(outcome_c ~ age_category + sex_category + demographic_group + 
+                   social_index + location, 
+                 data = df_outcome_c, 
+                 family = binomial)
+
+model_extended <- glm(outcome_c ~ age_category + sex_category + demographic_group + 
+                       social_index + location + visit_count_grouped, 
+                     data = df_outcome_c, 
+                     family = binomial)
+
+# Perform likelihood ratio test
+lrt_result <- anova(model_base, model_extended, test = "LRT")
+print("Likelihood Ratio Test results:")
+print(lrt_result)
+
+# Compare AIC
+aic_comparison <- data.frame(
+  Model = c("Base model", "Extended model"),
+  AIC = c(AIC(model_base), AIC(model_extended))
+)
+print("\nAIC Comparison:")
+print(aic_comparison)
+
+# Calculate and compare McFadden's R-squared
+mcfadden_r2 <- function(model) {
+  1 - (model$deviance / model$null.deviance)
+}
+
+r2_comparison <- data.frame(
+  Model = c("Base model", "Extended model"),
+  McFadden_R2 = c(mcfadden_r2(model_base), mcfadden_r2(model_extended))
+)
+print("\nMcFadden's R-squared Comparison:")
+print(r2_comparison)
+
+# Compare number of parameters
+params_comparison <- data.frame(
+  Model = c("Base model", "Extended model"),
+  Number_of_Parameters = c(length(coef(model_base)), 
+                          length(coef(model_extended)))
+)
+print("\nNumber of Parameters Comparison:")
+print(params_comparison)
+
+# Perform cross-validation
+set.seed(123)
+cv_folds <- createFolds(df_outcome_c$outcome_c, k = 10)
+
+cv_results <- lapply(cv_folds, function(test_indices) {
+  train_data <- df_outcome_c[-test_indices, ]
+  test_data <- df_outcome_c[test_indices, ]
+  
+  # Train and test base model
+  model_base_cv <- glm(outcome_c ~ age_category + sex_category + 
+                        demographic_group + social_index + location, 
+                      data = train_data, 
+                      family = binomial)
+  base_pred <- predict(model_base_cv, newdata = test_data, type = "response")
+  base_auc <- auc(test_data$outcome_c, base_pred)
+  
+  # Train and test extended model
+  model_extended_cv <- glm(outcome_c ~ age_category + sex_category + 
+                            demographic_group + social_index + location + 
+                            visit_count_grouped, 
+                         data = train_data, 
+                         family = binomial)
+  extended_pred <- predict(model_extended_cv, newdata = test_data, type = "response")
+  extended_auc <- auc(test_data$outcome_c, extended_pred)
+  
+  return(c(base_auc, extended_auc))
+})
+
+cv_results_df <- data.frame(do.call(rbind, cv_results))
+colnames(cv_results_df) <- c("Base Model", "Extended Model")
+
+print("\nCross-validation Results (AUC):")
+print(cv_results_df)
+print("\nMean AUC:")
+print(colMeans(cv_results_df))
+
+#######################################
+# Part 4: Stratified Analysis
+#######################################
+
+# Define automated locations
+automated_locations <- c('LOC001', 'LOC002', 'LOC003', 'LOC004', 'LOC005', 
+                        'LOC006', 'LOC007', 'LOC008', 'LOC009')
+
+# Create automation status variable and split data
+df_outcome_a <- df_outcome_a %>%
+  mutate(automation_status = ifelse(location %in% automated_locations, 
+                                  "Automated", "Manual"))
+
+df_automated <- df_outcome_a %>% filter(automation_status == "Automated")
+df_manual <- df_outcome_a %>% filter(automation_status == "Manual")
+
+# Fit stratified models
+model_automated <- glm(outcome_a ~ age_category + sex_category + demographic_group + 
+                        social_index + visit_count_grouped + location, 
+                      data = df_automated, 
+                      family = binomial)
+
+model_manual <- glm(outcome_a ~ age_category + sex_category + demographic_group + 
+                     social_index + visit_count_grouped + location, 
+                   data = df_manual, 
+                   family = binomial)
+
+# Print model summaries
+print("Model Summary for Automated Locations:")
+print(summary(model_automated))
+print("\nModel Summary for Manual Locations:")
+print(summary(model_manual))
+
+# Perform cross-validation for stratified models
+set.seed(123)
+cv_folds_auto <- createFolds(df_automated$outcome_a, k = 10)
+cv_folds_manual <- createFolds(df_manual$outcome_a, k = 10)
+
+# Cross-validation for automated locations
+cv_results_auto <- lapply(cv_folds_auto, function(test_indices) {
+  train_data <- df_automated[-test_indices, ]
+  test_data <- df_automated[test_indices, ]
+  
+  model_auto_cv <- glm(outcome_a ~ age_category + sex_category + demographic_group + 
+                        social_index + visit_count_grouped + location, 
+                      data = train_data, 
+                      family = binomial)
+  auto_pred <- predict(model_auto_cv, newdata = test_data, type = "response")
+  auto_auc <- auc(test_data$outcome_a, auto_pred)
+  
+  return(auto_auc)
+})
+
+# Cross-validation for manual locations
+cv_results_manual <- lapply(cv_folds_manual, function(test_indices) {
+  train_data <- df_manual[-test_indices, ]
+  test_data <- df_manual[test_indices, ]
+  
+  model_manual_cv <- glm(outcome_a ~ age_category + sex_category + demographic_group + 
+                          social_index + visit_count_grouped + location, 
+                        data = train_data, 
+                        family = binomial)
+  manual_pred <- predict(model_manual_cv, newdata = test_data, type = "response")
+  manual_auc <- auc(test_data$outcome_a, manual_pred)
+  
+  return(manual_auc)
+})
+
+# Compile and print cross-validation results
+cv_results_df_auto <- data.frame(AUC_Automated = unlist(cv_results_auto))
+cv_results_df_manual <- data.frame(AUC_Manual = unlist(cv_results_manual))
+
+print("\nCross-validation Results (AUC) for Automated Locations:")
+print(cv_results_df_auto)
+print("\nCross-validation Results (AUC) for Manual Locations:")
+print(cv_results_df_manual)
+print("\nMean AUC for Automated Locations:")
+print(mean(cv_results_df_auto$AUC_Automated))
+print("\nMean AUC for Manual Locations:")
+print(mean(cv_results_df_manual$AUC_Manual))
+
+
+```
+
+

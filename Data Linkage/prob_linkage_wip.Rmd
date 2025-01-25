@@ -1,0 +1,160 @@
+---
+title: "Record Linkage Analysis"
+date: "Feb 2024"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+    theme: cerulean 
+pdf_document:
+  toc: yes
+---
+
+------------------------------------------------------------------------
+
+# Setup
+
+## Import R libraries
+
+```{r packages, message=FALSE}
+# Import libraries
+pacman::p_load(
+  pacman,
+  tidyverse,
+  readxl,
+  writexl,
+  DBI,
+  odbc,
+  knitr,
+  data.table,
+  kableExtra,
+  janitor,
+  report,
+  naniar
+)
+```
+
+## Import and clean data
+
+```{r dataclean}
+source("data_preparation.R")
+```
+
+## View data completeness and uniqueness
+```{r primary_summary_view}
+primary_data_summary
+```
+
+```{r secondary_summary_view}
+secondary_data_summary
+```
+
+- Record identifier is complete for `r prop_complete(primary_clean_data$record_id)`% of records in Primary dataset and `r prop_complete(secondary_clean_data$record_id)`% of records in Secondary dataset. This will facilitate 'Deterministic Linkage'.
+
+- Assumption for this exercise is that the record identifier is unique and correct.
+
+- We will link both datasets using available identifiers to create subset that contains 'comparison pairs'.
+
+- This subset can be used as a 'Gold-standard' from which matching probabilities can be calculated.
+
+## Naming conventions
+
+- Note that both datasets contain variables with the same naming convention, which will cause confusion when identifying these variables after linkage.
+
+- Therefore, one approach to overcome this, is to add a prefix to each variable:
+
+    - For variables in Primary file add P_
+    - For variables in Linking file add L_
+    
+- The names have been formatted like this in primary_clean and secondary_clean
+
+# Deterministic linkage with record identifier
+
+- Perform a cross-join on the identifier, where P_id == L_id.
+- Reorder columns & sort by ascending ids
+
+```{r}
+rm(list=setdiff(ls(), c("primary_clean", "secondary_clean"))) # removes all unused objects to save memory
+
+# Merge primary and linking based on the 'id' variable
+merged_df <- merge(secondary_clean, primary_clean, 
+                  by.x = "L_record_id", by.y = "P_record_id", 
+                  incomparables = NA) %>%
+  select("P_id", 
+         "L_id", 
+         "L_record_id", 
+         "P_birth_date", 
+         "L_birth_date",
+         "P_location",
+         "L_location",
+         "P_category", 
+         "L_category",
+         "P_date",
+         "L_date")
+
+# Sort
+sorted_indices <- order(merged_df$P_id, merged_df$L_id)
+merged_df <- merged_df[sorted_indices, ]
+rm(sorted_indices)
+```
+
+[Continue with detailed data processing steps...]
+
+## Create Agreement patterns
+
+```{r}
+# New variables showing agreement patterns 
+merged_df$agree_birth <- if_else(merged_df$P_birth_date == merged_df$L_birth_date, 1,0,0)
+merged_df$agree_location <- if_else(merged_df$P_location == merged_df$L_location, 1,0,0)
+merged_df$agree_category <- if_else(merged_df$P_category == merged_df$L_category, 1,0,0)
+merged_df$agree_date <- if_else(merged_df$P_date == merged_df$L_date, 1,0,0)
+
+merged_df$agreement_pattern <- paste(merged_df$agree_birth, 
+                                   merged_df$agree_location, 
+                                   merged_df$agree_category, 
+                                   merged_df$agree_date, sep = "")
+
+# Generate m-probabilities and u-probabilities
+[... continue with probability calculations ...]
+
+# Calculate weights and generate match scores
+[... continue with weight calculations ...]
+
+# Final match selection
+[... continue with match selection logic ...]
+```
+
+## Results Summary
+
+```{r}
+# Generate final summary statistics
+summary_stats <- data.frame(
+  Metric = c("Total Records Processed",
+             "Deterministic Matches",
+             "Probabilistic Matches",
+             "Total Matched Pairs"),
+  Count = c(nrow(primary_clean),
+            sum(deterministic_matches),
+            sum(probabilistic_matches),
+            total_matches)
+)
+
+kable(summary_stats, caption = 'Linkage Summary') %>%
+  kable_styling(bootstrap_options = c("striped"), 
+                full_width = F, 
+                position = "left")
+```
+
+## Visualization of Results
+
+```{r}
+# Generate visualizations of match quality
+ggplot(match_quality, aes(x = weight_score)) +
+  geom_histogram(fill = "lightblue", bins = 30) +
+  labs(title = "Distribution of Match Weights",
+       x = "Weight Score",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+# Complete
