@@ -1,0 +1,594 @@
+---
+title: "Emergency department opt-out testing evaluation"
+subtitle: "Sentinel data quality investigation" #delete if not required
+author: "Jessica Edney" #delete if not required
+date: "2024"
+
+output: 
+  officedown::rdocx_document:
+    reference_docx: fancy_template.docx
+    toc: TRUE #delete if not required
+    page_margins:
+      bottom: 1
+      top: 1
+      right: 0.5
+      left: 0.5
+      header: 0.5
+      footer: 0.5
+      gutter: 0.0
+urlcolor: blue
+bibliography: references.bib
+csl: custom.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+knitr::opts_knit$set(root.dir = 'Y:/NEW NCSP/RESEARCH AND DEVELOPMENT/J Edney/ED opt out/ed-monitoring/')
+```
+
+# Overall comparison
+
+text text
+```{r packages, echo=FALSE}
+# load packages
+pacman::p_load(
+    pacman,
+    tidyverse,
+    lubridate,
+    readxl,
+    writexl,
+    reshape2,
+    scales,
+    flextable,
+    officer
+)
+```
+
+```{r import, echo=FALSE}
+# run data comparison script (make take a while)
+source("data_comparison.R")
+
+data <- read_excel("Y:/NEW NCSP/RESEARCH AND DEVELOPMENT/J Edney/ED opt out/ed-monitoring/sentinel_nhse_compared_raw.xlsx")
+
+source("Y:/NEW NCSP/RESEARCH AND DEVELOPMENT/J Edney/ED opt out/ed-monitoring/theme_ukhsa.R")
+source("Y:/NEW NCSP/RESEARCH AND DEVELOPMENT/J Edney/ED opt out/ed-monitoring/ukhsa_colours.R")
+pal_hc <- ukhsa_colours("high_contrast")
+
+options(scipen = 999)
+```
+
+```{r data prep, echo=FALSE}
+overall <- data %>%
+group_by(event) %>%
+mutate(NHSE = sum(nhse_total),
+ECDS = sum(ecds_total)) %>%
+select(event, NHSE, ECDS) %>%
+distinct() %>% 
+mutate(`Difference (%)` = round(((ECDS-NHSE)/NHSE) * 100, 1)) %>%
+mutate(`Difference (%)` = `Difference (%)`^2) %>%
+mutate(`Difference (%)` = sqrt(`Difference (%)`)) %>%
+ungroup()
+
+overall$Event <- str_wrap(overall$event, width = 10)
+
+overall_long <- overall %>%
+  select(Event, NHSE, ECDS) %>%
+reshape2::melt(id.vars = "Event", variable.name = "Source", value.name = "Number")
+```
+
+### Fig.1: Difference (%) in number of events compared to NHSE data by event type
+```{r difference, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(overall, aes(x = reorder(Event, -`Difference (%)`), y = `Difference (%)`, fill = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`)) +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Event")+
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+# Attendances 
+
+```{r attendances, echo=FALSE}
+attendances <- data %>%
+filter(event == "Attendance") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+attendances$perc_diff <- as.numeric(attendances$perc_diff)
+                                    
+attendances <- attendances %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(attendances$NHSE), 0)
+total_nhse <- round(sum(attendances$NHSE), 0)
+mean_ecds <- round(mean(attendances$ECDS), 0)
+total_ecds <- round(sum(attendances$ECDS), 0)
+mean_diff <- round(mean(attendances$perc_diff), 0)
+max_diff <- attendances[which.max(attendances$perc_diff),]
+min_diff <- attendances[which.min(attendances$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** attendances in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** attendances in NHSE data. The average number of attendances across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of attendances in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.2: Difference (%) in number of ECDS ED attendances compared to NHSE data by site 
+```{r attendances_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(attendances, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 1: Numbers of ED attendances in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r attendances_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+attendances_tbl <- attendances %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+attendances_tbl
+```
+
+# Blood tests
+
+```{r blood_tests, echo=FALSE}
+bloodtests <- data %>%
+filter(event == "Blood test") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+bloodtests$perc_diff <- as.numeric(bloodtests$perc_diff)
+                                    
+bloodtests <- bloodtests %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(bloodtests$NHSE), 0)
+total_nhse <- round(sum(bloodtests$NHSE), 0)
+mean_ecds <- round(mean(bloodtests$ECDS), 0)
+total_ecds <- round(sum(bloodtests$ECDS), 0)
+mean_diff <- round(mean(bloodtests$perc_diff), 0)
+max_diff <- bloodtests[which.max(bloodtests$perc_diff),]
+min_diff <- bloodtests[which.min(bloodtests$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** attendances with blood tests in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** attendances with blood tests in NHSE data. The average number of attendances with blood tests across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of attendances with blood tests in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.3: Difference (%) in number of ECDS ED attendances with blood tests compared to NHSE data
+```{r bloodtests_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(bloodtests, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 2: Numbers of ED attendances with blood tests in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r bloodtests_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+bloodtests_tbl <- bloodtests %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+bloodtests_tbl
+```
+
+# HBV tests
+
+```{r hbv_tests, echo=FALSE}
+hbvtests <- data %>%
+filter(event == "HBV test") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+hbvtests$perc_diff <- as.numeric(hbvtests$perc_diff)
+                                    
+hbvtests <- hbvtests %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(hbvtests$NHSE), 0)
+total_nhse <- round(sum(hbvtests$NHSE), 0)
+mean_ecds <- round(mean(hbvtests$ECDS), 0)
+total_ecds <- round(sum(hbvtests$ECDS), 0)
+mean_diff <- round(mean(hbvtests$perc_diff), 0)
+max_diff <- hbvtests[which.max(hbvtests$perc_diff),]
+min_diff <- hbvtests[which.min(hbvtests$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** HBV tests in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** HBV tests in NHSE data. The average number of HBV tests across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of HBV tests in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.4: Difference (%) in number of ECDS ED attendances with HBV tests compared to NHSE data
+```{r hbvtests_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hbvtests, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 3: Numbers of ED attendances with HBV tests in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r hbvtests_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+hbvtests_tbl <- hbvtests %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+hbvtests_tbl
+```
+
+# HCV tests
+
+```{r hcv_tests, echo=FALSE}
+hcvtests <- data %>%
+filter(event == "HCV test") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+hcvtests$perc_diff <- as.numeric(hcvtests$perc_diff)
+                                    
+hcvtests <- hcvtests %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(hcvtests$NHSE), 0)
+total_nhse <- round(sum(hcvtests$NHSE), 0)
+mean_ecds <- round(mean(hcvtests$ECDS), 0)
+total_ecds <- round(sum(hcvtests$ECDS), 0)
+mean_diff <- round(mean(hcvtests$perc_diff), 0)
+max_diff <- hcvtests[which.max(hcvtests$perc_diff),]
+min_diff <- hcvtests[which.min(hcvtests$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** HCV tests in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** HCV tests in NHSE data. The average number of HCV tests across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of HCV tests in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.5: Difference (%) in number of ECDS ED HCV tests compared to NHSE data
+```{r hcvtests_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hcvtests, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 4: Numbers of ED attendances with HCV tests in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r hcvtests_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+hcvtests_tbl <- hcvtests %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+hcvtests_tbl
+```
+
+# HIV tests
+
+```{r hiv_tests, echo=FALSE}
+hivtests <- data %>%
+filter(event == "HIV test") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+hivtests$perc_diff <- as.numeric(hivtests$perc_diff)
+                                    
+hivtests <- hivtests %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(hivtests$NHSE), 0)
+total_nhse <- round(sum(hivtests$NHSE), 0)
+mean_ecds <- round(mean(hivtests$ECDS), 0)
+total_ecds <- round(sum(hivtests$ECDS), 0)
+mean_diff <- round(mean(hivtests$perc_diff), 0)
+max_diff <- hivtests[which.max(hivtests$perc_diff),]
+min_diff <- hivtests[which.min(hivtests$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** HIV tests in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** HIV tests in NHSE data. The average number of HIV tests across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of HIV tests in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.6: Difference (%) in number of ECDS ED HIV tests compared to NHSE data
+```{r hivtests_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hivtests, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 5: Numbers of ED attendances with HIV tests in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r hivtests_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+hivtests_tbl <- hivtests %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+hivtests_tbl
+```
+
+# HBV diagnoses
+
+```{r hbv_diags, echo=FALSE}
+hbvdiags <- data %>%
+filter(event == "HBV test") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+hbvdiags$perc_diff <- as.numeric(hbvdiags$perc_diff)
+                                    
+hbvdiags <- hbvdiags %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(hbvdiags$NHSE), 0)
+total_nhse <- round(sum(hbvdiags$NHSE), 0)
+mean_ecds <- round(mean(hbvdiags$ECDS), 0)
+total_ecds <- round(sum(hbvdiags$ECDS), 0)
+mean_diff <- round(mean(hbvdiags$perc_diff), 0)
+max_diff <- hbvdiags[which.max(hbvdiags$perc_diff),]
+min_diff <- hbvdiags[which.min(hbvdiags$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** HBV diagnoses in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** HBV diagnoses in NHSE data. The average number of HBV diagnoses across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of HBV diagnoses in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.7: Difference (%) in number of ECDS ED HBV diagnoses compared to NHSE data
+```{r hbvdiag_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hbvdiags, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 6: Numbers of ED attendances with HBV diagnoses in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r hbvdiags_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+hbvdiags_tbl <- hbvdiags %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+hbvdiags_tbl
+```
+
+# HCV diagnoses
+
+```{r hcv_diags, echo=FALSE}
+hcvdiags <- data %>%
+filter(event == "HCV test") %>%
+select(-event) %>%
+rename(Site = site_code,
+NHSE = nhse_total,
+ECDS = ecds_total)
+
+hcvdiags$perc_diff <- as.numeric(hcvdiags$perc_diff)
+                                    
+hcvdiags <- hcvdiags %>%
+mutate(`Difference (%)` = round(perc_diff, 1))
+       
+# define values
+mean_nhse <- round(mean(hcvdiags$NHSE), 0)
+total_nhse <- round(sum(hcvdiags$NHSE), 0)
+mean_ecds <- round(mean(hcvdiags$ECDS), 0)
+total_ecds <- round(sum(hcvdiags$ECDS), 0)
+mean_diff <- round(mean(hcvdiags$perc_diff), 0)
+max_diff <- hcvdiags[which.max(hcvdiags$perc_diff),]
+min_diff <- hcvdiags[which.min(hcvdiags$perc_diff),]
+```
+
+There was a total of **`r format(total_ecds, big.mark = ",", scientific = FALSE)`** HCV diagnoses in ECDS data and **`r format(total_nhse, big.mark = ",", scientific = FALSE)`** HCV diagnoses in NHSE data. The average number of HCV diagnoses across all the sites was **`r format(mean_ecds, big.mark = ",", scientific = FALSE)`** in ECDS data and **`r format(mean_nhse, big.mark = ",", scientific = FALSE)`** in NHSE data.
+
+On average, there was a difference of **`r format(mean_diff, big.mark = ",", scientific = FALSE)`**% in the number of HCV diagnoses in ECDS data compared to NHSE data. The biggest difference was **`r round(max_diff$perc_diff, 0)`%** at `r max_diff$Site` and the smallest difference was **`r round(min_diff$perc_diff, 0)`%** at `r min_diff$Site`.
+
+### Fig.8: Difference (%) in number of ECDS ED HCV diagnoses compared to NHSE data
+```{r hcvdiag_graph, echo=FALSE, fig.width=7, fig.height=5}
+ggplot(hcvdiags, aes(x = reorder(Site, -`Difference (%)`), y = `Difference (%)`)) +
+geom_col(aes(fill = `Difference (%)`), position = "dodge2") +
+scale_y_continuous(labels = label_comma(), expand = c(0, 0)) +
+scale_fill_continuous(trans = 'reverse') +
+labs(x = "Site") +
+theme_ukhsa() +
+theme(legend.position = "none",
+  text = element_text(size=12),
+  legend.text = element_text(size=12),
+  axis.text.x = element_text(angle = 90),
+  plot.subtitle = element_text(vjust = 5))
+```
+
+### Table 7: Numbers of ED attendances with HCV diagnoses in NHSE and ECDS data by site with percentage difference (ECDS compared to NHSE)
+```{r hcvdiags_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+hcvdiags_tbl <- hcvdiags %>%
+  select(-perc_diff) %>%
+  arrange(`Difference (%)`) %>%
+  flextable() %>%
+  autofit() %>%
+  bg(., i = ~`Difference (%)` < 20, part = "body", bg = "green") %>%
+  bg(., i = ~`Difference (%)` > 20 & `Difference (%)` < 30, part = "body", bg = "yellow") %>%
+  bg(., i = ~`Difference (%)` > 30, part = "body", bg = "red")
+  
+hcvdiags_tbl
+```
+
+<!---BLOCK_LANDSCAPE_START--->
+# All data
+```{r all_data_prep, echo=FALSE}
+all_data <- data 
+
+all_data$perc_diff <- as.numeric(all_data$perc_diff)
+
+all_data <- all_data %>%
+  mutate(perc_diff = round(perc_diff, 0)) %>%
+  select(-c(nhse_total, ecds_total)) %>%
+  spread(key = event, value = perc_diff) %>%
+  rename(Site = site_code) %>%
+  select(Site, Attendance, `Blood test`, `HBV test`, `HCV test`, `HIV test`, `HBV diagnosis`, `HCV diagnosis`)
+```
+### Table 8: Numbers of ED attendances in NHSE and ECDS data by event and site with percentage difference (ECDS compared to NHSE)
+```{r all_table, echo=FALSE}
+# green if less than 20%
+# yellow if 21-30%
+# red if over 30%
+all_tbl <- all_data %>%
+  arrange(Site) %>%
+  flextable() %>%
+  autofit() %>%
+  add_header_row(values = c("", "Percentage change (%)"), colwidths = c(1, 7)) %>%
+  flextable::align(i = NULL, j = NULL, align = "center", part = "all")
+
+all_tbl
+```
+<!---BLOCK_LANDSCAPE_STOP--->
+
+# About the UK Health Security Agency
+
+UKHSA is responsible for protecting every member of every community from the impact of infectious diseases, chemical, biological, radiological and nuclear incidents and other health threats. We provide intellectual, scientific and operational leadership at national and local level, as well as on the global stage, to make the nation heath secure.
+
+[UKHSA](www.gov.uk/government/organisations/uk-health-security-agency) is an executive agency, sponsored by the [Department of Health and Social Care](www.gov.uk/government/organisations/department-of-health-and-social-care)
+
+
+\  
+
+\  
+
+\ 
+
+\ 
+
+\ 
+
+\ 
+
+
+[www.gov.uk/government/organisations/uk-health-security-agency](www.gov.uk/government/organisations/uk-health-security-agency)  
+\ 
+
+© Crown copyright 20XX  
+Version X 
+\ 
+
+Prepared by: XXXX  
+For queries relating to this document, please contact: XXXXX
+\ 
+
+Published: Month 20XX  
+Publishing reference: GOV-XXXX
+\ 
+
+\ 
+
+![](logo1.png)   
+
+\ 
+
+You may re-use this information (excluding logos) free of charge in any format or medium, under the terms of the Open Government Licence v3.0. To view this licence, visit OGL. Where we have identified any third party copyright information you will need to obtain permission from the copyright holders concerned.
+
+\ 
+
+![](logo2.png)   

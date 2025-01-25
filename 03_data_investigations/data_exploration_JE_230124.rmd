@@ -1,0 +1,369 @@
+---
+title: "Data exploration"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'Y:/NEW NCSP/RESEARCH AND DEVELOPMENT/J Edney/ED opt out/ed-monitoring/')
+```
+
+## Instructions
+For each site, compare our numbers for ED attendances, attendances with blood tests, BBV tests and diagnoses (produced from several SQL scripts) with those from the NHSE data dashboard to check data quality – by site
+	Planned output: automated report
+	Currently in Excel form – but need to separate out the groups to make it easier to look at
+	Deadline: end of Feb
+
+The SOP is here:
+  20230904SOP_ED_data_analysis.docx
+
+The scripts that link the ECDS data to the EmergencyDepartment_tests data are named 1 to 10 as 1_make_12monthECDS, 2_make_12monthECDSattendances…etc. They are all in the repo and will be explained in the SOP once it’s finalised. 
+
+## Setup
+```{r packages}
+pacman::p_load(
+    pacman,
+    tidyverse,
+    lubridate,
+    readxl,
+    writexl,
+    DBI,
+    odbc,
+    arrow,
+    janitor,
+    reshape2
+)
+```
+
+```{r connection}
+#ESTABLISH ODBC CONNECTION WITH DATA
+Y006 <- odbc::dbConnect(odbc::odbc(),
+                        .connection_string = "driver={SQL Server};server=SQLClusColLK19\\Lake19;
+                             database=Y006_BBV_PID;
+                             Encrypt=true;trusted_connection=true",
+                        timeout = 60,
+                        timezone = Sys.timezone(),
+                        timezone_out = Sys.timezone())
+```
+
+## All sites
+```{r ED attendances}
+# load attendances data (takes about 30 mins)
+attendances <- DBI::dbGetQuery(conn = Y006 , statement = "
+SELECT [SITE], 
+[ECDS_bloods_any], 
+[included_sites], 
+[Sentinel_sites], 
+[HIV], 
+[HCV], 
+[HBV],
+[HCVAb],
+[HCVPCR],
+[HBVAg]
+FROM [Y006_BBV_PID].[dbo].[12monthECDSattendances]
+WHERE (ARRIVAL_DATE <= '2023-04-07')"
+) %>%
+clean_names() %>%
+rename(site_code = site)
+```
+
+## Sentinel sites
+```{r ED attendances sentinel sites}
+sentinel_sites <- attendances %>%
+filter(sentinel_sites == "Yes")
+```
+
+### attendances count
+```{r ED attendances sentinel table}
+sentinel_tbl <- sentinel_sites %>% 
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+  mutate(event = "Attendance")
+```
+
+### attendances with blood test count
+```{r ED attendances sentinel with blood tests table}
+sentinel_blood_test_tbl <- sentinel_sites %>% 
+filter(ecds_bloods_any == "bloods_any") %>%
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+mutate(event = "Blood test")
+```
+
+### attendances with HIV test count
+```{r ED attendances sentinel with HIV test table}
+sentinel_hiv_test_tbl <- sentinel_sites %>% 
+filter(ecds_bloods_any == "bloods_any" & hiv == "Yes") %>%
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+mutate(event = "HIV test")
+```
+
+### attendances with HCV test count
+```{r ED attendances sentinel with HCV test table}
+sentinel_hcv_test_tbl <- sentinel_sites %>% 
+filter(ecds_bloods_any == "bloods_any" & hcv == "Yes") %>%
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+mutate(event = "HCV test")
+```
+
+### attendances with HBV test count
+```{r ED attendances sentinel with HBV test table}
+sentinel_hbv_test_tbl <- sentinel_sites %>% 
+filter(ecds_bloods_any == "bloods_any" & hbv == "Yes") %>%
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+mutate(event = "HBV test")
+```
+
+### attendances with HCV diagnosis count
+```{r ED attendances sentinel with HCV diag table}
+sentinel_hcv_diag_tbl <- sentinel_sites %>% 
+filter(ecds_bloods_any == "bloods_any" & hcvpcr == "Positive") %>%
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+mutate(event = "HCV diagnosis") 
+```
+
+### attendances with HBV diagnosis count
+```{r ED attendances sentinel with HBV diag table}
+sentinel_hbv_diag_tbl <- sentinel_sites %>% 
+filter(ecds_bloods_any == "bloods_any" & hcv == "Yes" & hbv_ag == "Positive") %>%
+  group_by(site_code) %>%
+  tally() %>% 
+  collect() %>%
+  rename(ecds_total = n) %>%
+mutate(event = "HBV diagnosis")
+```
+
+```{r join sentinel tables}
+sentinel_all_numbers <- bind_rows(
+  sentinel_tbl,
+  sentinel_blood_test_tbl,
+  sentinel_hiv_test_tbl,
+  sentinel_hcv_test_tbl,
+  sentinel_hbv_test_tbl,
+  sentinel_hcv_diag_tbl,
+  sentinel_hbv_diag_tbl
+)
+```
+
+## NHSE DATA
+```{r import NHSE data}
+nhse_numbers <- read.csv("nhse_data_060224.csv") %>%
+clean_names() %>%
+select(metric_name,
+site_hospital_name,
+year_of_reporting_period_start,
+month_of_reporting_period_start,
+metric_or_proportion_integer)
+```
+
+```{r clean NHSE data}
+# concatenate the month and year into one field 
+nhse_numbers$date <- with(
+  nhse_numbers, 
+  sprintf("%d-%02s", 
+  year_of_reporting_period_start,
+  month_of_reporting_period_start))
+
+#remove dates after March 2023
+nhse_numbers <- nhse_numbers %>%
+  filter(
+    (
+      !date %in% c(
+        '2023-April', '2023-May', '2023-June', '2023-July', '2023-August'
+        )) & (
+          metric_name %in% c(
+            "BBV attending ED (adults)",
+            "BBV ED attendances with blood tests",
+            "ED attendances with blood tests minus blocked",
+            "Hep B antigen tests performed (BBV)",
+            "Hep C antibody tests performed",
+            "Hep C RNA tests performed",
+            "HIV tests performed",
+            "Positive Hep B antigen tests",
+            "Positive Hep C antibody tests",
+            "Positive Hep C RNA tests (BBV)",
+            "Reactive HIV tests"
+          )
+      )) %>%
+      mutate(
+        metric_or_proportion_integer = ifelse(is.na(metric_or_proportion_integer), 0, metric_or_proportion_integer
+        ),
+        site_hospital_name = toupper(site_hospital_name),
+        site_name = recode(site_hospital_name, "CHELSEA AND WESTMINSTER HOSPITAL" = "CHELSEA & WESTMINSTER HOSPITAL",
+        "KING'S COLLEGE HOSPITAL (DENMARK HILL)" = "KING'S COLLEGE HOSPITAL"))
+```
+
+# totals overall
+```{r calculate totals from NHSE data}
+# calculate totals for the year
+nhse_totals_tbl <- nhse_numbers %>%
+  group_by(metric_name) %>%
+  mutate (total = sum(metric_or_proportion_integer)) %>%
+  distinct(metric_name, total)
+```
+
+# totals by site
+```{r import site code lookup}
+site_codes <- read_xlsx(
+  "sitecodelookup.xlsx"
+) %>%
+clean_names() %>%
+mutate(site_name = toupper(hospital))
+```
+
+```{r join NHSE data and site codes}
+nhse_numbers_by_site <- nhse_numbers %>%
+left_join(
+  site_codes,
+  by = "site_name"
+)
+```
+
+### attendances
+```{r nhse attendances}
+nhse_attendances_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "BBV attending ED (adults)") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "Attendance")
+```
+
+### blood tests
+```{r nhse attendances with blood tests}
+nhse_blood_test_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "BBV ED attendances with blood tests") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "Blood test")
+```
+
+### HIV tests
+```{r nhse attendances with HIV tests}
+nhse_hiv_test_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "HIV tests performed") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "HIV test")
+```
+
+### HBV tests
+```{r nhse attendances with HBV tests}
+nhse_hbv_test_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "Hep B antigen tests performed (BBV)") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "HBV test")
+```
+
+### HCV tests
+```{r nhse attendances with HCV tests}
+nhse_hcv_test_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "Hep C antibody tests performed") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "HCV test")
+```
+
+### HCV diags
+```{r nhse attendances with HCV diags}
+nhse_hcv_diag_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "Positive Hep C RNA tests (BBV)") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "HCV diagnosis")
+```
+### HBV diags
+```{r nhse attendances with HBV diags}
+nhse_hbv_diag_tbl <- nhse_numbers_by_site %>%
+filter(metric_name == "Positive Hep B antigen tests") %>%
+select(site_ods_code, metric_or_proportion_integer) %>%
+group_by(site_ods_code) %>%
+mutate(nhse_total = sum(metric_or_proportion_integer)) %>%
+select(-metric_or_proportion_integer) %>%
+ungroup() %>%
+distinct() %>%
+mutate(event = "HBV diagnosis")
+```
+
+### join tables
+```{r join NHSE tables}
+nhse_all_numbers <- bind_rows(
+  nhse_attendances_tbl,
+  nhse_blood_test_tbl,
+  nhse_hbv_diag_tbl,
+  nhse_hbv_test_tbl,
+  nhse_hcv_diag_tbl,
+  nhse_hcv_test_tbl,
+  nhse_hiv_test_tbl
+)
+```
+
+## compare NHSE data and our data
+### attendances
+```{r compare attendances}
+sentinel_nhse_compared <- left_join(
+  sentinel_all_numbers,
+  nhse_all_numbers,
+  by = join_by("site_code" == "site_ods_code", "event")
+) %>%
+select(site_code,
+event,
+nhse_total,
+ecds_total
+) %>%
+mutate(perc_diff = (ecds_total - nhse_total)/nhse_total*100) %>%
+mutate(perc_diff = perc_diff^2) %>%
+mutate(perc_diff = sqrt(perc_diff))
+```
+
+### export to excel
+```{r export}
+write_xlsx(sentinel_nhse_compared,
+"sentinel_nhse_compared_raw.xlsx")
+```
+
+### split datasets
+```{r split}
+# site_list <- split(sentinel_nhse_compared, sentinel_nhse_compared$site_code)
+# list2env(site_list, envir= .GlobalEnv)
+```

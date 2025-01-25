@@ -1,0 +1,760 @@
+---
+title: "ED testing 12 month report charts"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data tables
+* Table 1: 5 sites
+* Table 2: All sites
+* Table 3: HCV linkage for all sites
+* Table 4: Site type comparison
+
+
+## List of charts
+1. Number of ED attendees by site type (Tables 1 & 4)
+2. + Percentage of ED attendees by age group and site type (Tables 1 & 4)
+   + Percentage of ED attendees by ethnic group and site type (Tables 1 & 4)
+   + Percentage of ED attendees by IMD and site type (Tables 1 & 4)
+3. BBV test uptake among ED attendees by site (Table 1)
+4. + Number of new diagnoses and percent of new diagnoses for HIV (Table 2)
+   + Number of new diagnoses and percent of new diagnoses for HCV (Table 2)
+   + Number of new diagnoses and percent of new diagnoses for HBV (Table 2)
+5. Percentages of patients diagnosd with HCV by linkage outcomes (Table 3)
+6. Percentages of patients diagnosed with HIV by linkage outcomes (Table 2)
+
+## Preparing data for graphs
+```{r load data}
+### load or install required packages
+if (!require(tidyverse)) install.packages("tidyverse")
+if (!require(lubridate)) install.packages("lubridate")
+if (!require(readxl)) install.packages("readxl")
+if (!require(pacman)) install.packages("pacman")
+if (!require(EpiFunc)) install.packages("EpiFunc")
+if (!require(janitor)) install.packages("janitor")
+if (!require(gtsummary)) install.packages("gtsummary")
+if (!require(scales)) install.packages("scales")
+if (!require(forcats)) install.packages("forcats")
+if (!require(stringr)) install.packages("stringr")
+if (!require(ggrepel)) install.packages("ggrepel")
+if (!require(ggrepel)) install.packages("plyr")
+
+# Read in data
+# source("mastertable.R")
+# source("Table_2.R")
+# source("Table_3.R")
+
+# Or read in from excel
+joined_table1 <- read_excel(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/MasterTables_export_301023.xlsx",
+  sheet = "Table 1 - 5 Sites"
+)
+
+joined_table2 <- read_excel(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/MasterTables_export_301023.xlsx",
+  sheet = "Table 2 - All Sites"
+) %>%
+  mutate(var = recode(var, "Asian: Indian, Pakistani or Bangladeshi" = "Indian, Pakistani or Bangladeshi"))
+
+joined_table3 <- read_excel(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/MasterTables_export_301023.xlsx",
+  sheet = "Table 3 - All Sites"
+)
+
+joined_table4 <- read_excel(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/MasterTables_export_301023.xlsx",
+  sheet = "Table 4 - Site Comparison"
+) %>%
+  mutate(var = recode(var, "Unknown" = "Unknown Ethnicity"))
+
+non_ed_tests <- read_excel(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/non_ed_testing_numbers.xlsx"
+)
+```
+
+## Formatting data tables
+```{r data formatting}
+# clean column names in joined tables
+joined_table1 <- joined_table1 %>% clean_names()
+joined_table2 <- joined_table2 %>% clean_names()
+joined_table3 <- joined_table3 %>% clean_names()
+joined_table4 <- joined_table4 %>% clean_names()
+```
+
+## Setting up graph aesthetics
+```{r graph aesthetics}
+#source("theme_ukhsa.R")
+#source("ukhsa_colours.R")
+
+# set colour palette
+pal6 <- ukhsa_colours("ukhsa_teals", 6)
+pal_hc <- ukhsa_colours("high_contrast")
+pal5 <- ukhsa_colours("ukhsa_teals", 5)
+pal9 <- ukhsa_colours("ukhsa_teals", 9)
+pal3 <- ukhsa_colours("ukhsa_teals", 3)
+pal4 <- ukhsa_colours("ukhsa_teals", 4)
+```
+
+## Figure 1: number of ED attendees by site type
+```{r fig1 data}
+# Picking out number of attendees from 5 sites
+total_attendees_5_sites <- joined_table1 %>%
+  filter(breakdown == "Total") %>%
+  select(number_of_patients_attending_ed_hiv_go_live_dates) %>%
+  mutate(site_type = "5 SSBBV sites") %>%
+  rename(number = number_of_patients_attending_ed_hiv_go_live_dates)
+
+# reformatting site comparison data for join
+total_attendees_all_sites <- joined_table4 %>%
+  filter(breakdown == "Total") %>%
+  select(
+    number_of_attendees_all_sites,
+    number_of_attendees_sentinel_sites,
+    number_of_attendees_london_sites,
+    number_of_attendees_outside_london_sites
+  ) %>%
+  gather(
+    site_type,
+    number,
+    number_of_attendees_all_sites:number_of_attendees_outside_london_sites
+  ) %>%
+  mutate(site_type = recode(
+    site_type,
+    "number_of_attendees_all_sites" = "All sites",
+    "number_of_attendees_sentinel_sites" = "SSBBV sites",
+    "number_of_attendees_london_sites" = "London sites",
+    "number_of_attendees_outside_london_sites" = "Manchester, Blackpool and Brighton"
+  ))
+
+# joining 5 sites and other site types
+total_attendees_by_site_type <- bind_rows(
+  total_attendees_5_sites,
+  total_attendees_all_sites
+) %>%
+mutate(
+  site_type_order = case_when(
+    site_type == "All sites" ~ 1,
+    site_type == "SSBBV sites" ~ 2, 
+    site_type == "5 SSBBV sites" ~ 3,
+    site_type == "London sites" ~ 4, 
+    site_type == "Manchester, Blackpool and Brighton" ~ 5),
+    color.group = ifelse(site_type %in% c("All sites",
+    "SSBBV sites",
+    "5 SSBBV sites"), "group1", "group2"
+    ))
+
+# format numbers as millions
+total_attendees_by_site_type <- total_attendees_by_site_type %>%
+  mutate(number_m = number / 1000000)
+
+# wrap labels
+total_attendees_by_site_type$site_type2 <- str_wrap(total_attendees_by_site_type$site_type, width = 6)
+```
+
+```{r fig1 graph}
+# build graph
+fig1_attendees_by_site_type <-
+  ggplot(
+    total_attendees_by_site_type,
+    aes(x = reorder(site_type2, site_type_order), y = number_m)
+  ) +
+  geom_col(aes(fill = as.factor(site_type_order)), position = "dodge2") +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_discrete(expand = c(0, 0.55)) +
+  labs(x = "Site type", y = "Number of ED attendees (millions)") +
+  geom_text(aes(label = round(number_m, 2), color = color.group), nudge_y=-0.08, fontface = "bold", size = 8) +
+  scale_fill_manual(values = pal5) +
+  scale_color_manual(values = c("black", "white")) +
+  theme_ukhsa() +
+  theme(legend.position = "none",
+  axis.ticks = element_blank())
+fig1_attendees_by_site_type
+
+ # ggsave(
+ #   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig1_attendees_by_site_type.svg",
+ #   plot = fig1_attendees_by_site_type,
+ #   width = 960,
+ #   height = 640,
+ #   units = "px",
+ #   dpi = 72
+ # )
+ # 
+ #  ggsave(
+ #   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig1_attendees_by_site_type.jpg",
+ #   plot = fig1_attendees_by_site_type,
+ #   width = 960,
+ #   height = 640,
+ #   units = "px",
+ #   dpi = 72
+ # )
+```
+
+## Figure 2: Percentage of ED attendees by age group and site type
+```{r fig2 data}
+attendees_all_sites <- joined_table4 %>%
+  select(breakdown, var, number_of_attendees_all_sites, number_of_attendees_who_had_a_blood_test_all_sites)
+attendees_all_sites_joined <- left_join(
+  attendees_all_sites, non_ed_tests,
+  by = c("breakdown", "var")
+) %>%
+  filter(!str_detect(var, "Unknown")) %>%
+  gather(site_group, number, number_of_attendees_all_sites:HIV_tests_ldn) %>%
+  mutate(site_group = recode(site_group,
+    "number_of_attendees_all_sites" = "All attendees",
+    "number_of_attendees_who_had_a_blood_test_all_sites" = "Attendees with blood tests",
+    "HIV_tests" = "HIV testing in SHS",
+    "HIV_tests_ldn" = "HIV testing in SHS (London)",
+    "HCV_tests" = "HCV testing outside ED",
+    "HBV_tests" = "HBV testing outside ED"
+  )) %>%
+  group_by(breakdown, site_group) %>%
+  mutate(percent = number / sum(number) * 100) %>%
+  ungroup() %>%
+  mutate(var = recode(var, "1" = "1: most deprived", "5" = "5: least deprived"),
+  label = if_else(var == "25 to 34", as.character(site_group), NA_character_),
+  color.group = ifelse(site_group %in% c("All attendees", "Attendees with blood tests"), "group1",
+  "group2"))
+
+attendees_all_sites_joined$var2 <- str_wrap(attendees_all_sites_joined$var, width = 10)
+attendees_all_sites_joined$site_group2 <- str_wrap(attendees_all_sites_joined$site_group, width = 14)
+```
+
+```{r fig2 graph}
+fig2_attendees_by_age <- ggplot(
+  filter(
+    attendees_all_sites_joined, breakdown == "Age group"
+  ),
+  aes(
+    x = var,
+    y = percent,
+    group = site_group
+  )
+) +
+  geom_line(linewidth = 2, aes(linetype = site_group2, color = site_group2)) +
+  labs(x = "Age group", y = "Percentage of attendees (%)") +
+  # geom_label_repel(aes(label = label),
+  #                  nudge_x = 1,
+  #                  na.rm = TRUE,
+  #                  size = 6) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_color_manual(values = pal6) +
+  theme_ukhsa() +
+  theme(
+    legend.key.width = unit(3,"cm"),
+    legend.title = element_blank(),
+    legend.position = "top")
+
+fig2_attendees_by_age
+
+ # ggsave(
+ #   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig2_attendees_by_age.svg",
+ #   plot = fig2_attendees_by_age,
+ #   width = 1000,
+ #   height = 640,
+ #   units = "px",
+ #   dpi = 72
+ # )
+ # 
+ # ggsave(
+ #   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig2_attendees_by_age.jpg",
+ #   plot = fig2_attendees_by_age,
+ #   width = 1000,
+ #   height = 640,
+ #   units = "px",
+ #   dpi = 72
+ # )
+```
+
+## Figure 3: Percentage of ED attendees by IMD quintile and site type
+```{r fig3 graph}
+fig3_attendees_by_imd <- ggplot(
+  filter(
+    attendees_all_sites_joined, 
+    breakdown == "IMD" & site_group != "HBV testing outside ED" & site_group != "HCV testing outside ED"
+  ),
+  aes(
+    x = var2,
+    y = percent,
+    group = site_group
+  )
+) +
+  geom_col(aes(fill = site_group), position = "dodge2") +
+  labs(x = "IMD quintile", y = "Percentage of attendees (%)") +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_discrete(expand = c(0, 0.55)) +
+  scale_color_manual(values = c('black', 'white'))+
+  geom_text(aes(label = scales::percent(percent, accuracy=1, scale=1), color = color.group), position=position_dodge(width=0.9), vjust=2, size = 6) +
+  scale_fill_manual(values = pal4) +
+  theme_ukhsa() +
+  theme(legend.title = element_blank(), legend.position = "top",
+  axis.ticks = element_blank()) +
+  guides(color = "none") 
+
+fig3_attendees_by_imd
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig3_attendees_by_imd.svg",
+#   plot = fig3_attendees_by_imd,
+#   width = 1200,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig3_attendees_by_imd.jpg",
+#   plot = fig3_attendees_by_imd,
+#   width = 1200,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+```
+
+## Figure 4: BBV test uptake among ED attendees
+```{r fig4 data}
+test_uptake_by_site <- read_excel("//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/site_uptake_chart_data.xlsx") %>%
+  gather(BBV, test_uptake, "HIV percent":"HBV percent") %>%
+  transform(BBV = str_replace(BBV, " percent", "")) %>%
+  mutate(Site = case_when(
+    SITE == "R1H12" ~ 1,
+    SITE == "R1HKH" ~ 2,
+    SITE == "R1HNH" ~ 3,
+    SITE == "RJ122" ~ 4,
+    SITE == "RQXM1" ~ 5
+  ),
+  color.group = case_when(BBV %in% c("HBV", "HCV") ~ "group1",
+BBV == "HIV" ~ "group2"))
+```
+
+```{r fig4 graph}
+test_uptake_by_site_graph <-
+  ggplot(
+    test_uptake_by_site,
+    aes(x = Site, y = test_uptake, group = BBV)
+  ) +
+  geom_col(aes(fill = BBV), position = "dodge2") +
+  scale_fill_manual(values = pal3) +
+  labs(
+    x = "Site", y = "BBV test uptake (%)"
+  ) +
+  #scale_x_discrete(expand = c(0, 0.55)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_color_manual(values = c('black', 'white')) +
+  geom_text(aes(label = scales::percent(test_uptake, accuracy=1, scale=1), color = color.group), position=position_dodge(width=0.9), vjust=2, size = 6) +
+  guides(fill = guide_legend(title = "BBV"), color = "none") +
+  theme_ukhsa() +
+  theme(axis.ticks = element_blank(),
+  legend.position = "top")
+test_uptake_by_site_graph
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig4_test_uptake_by_site_graph.svg",
+#   plot = test_uptake_by_site_graph,
+#   width = 1000,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig4_test_uptake_by_site_graph.jpg",
+#   plot = test_uptake_by_site_graph,
+#   width = 1000,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+```
+
+## Figure 5: New HBV diagnosis rate by demographics
+```{r fig5 data}
+hbv_pos <- joined_table1 %>%
+  select(breakdown, var, indicator_hbv_6c_hbv_new_diagnosis_rate) %>%
+  filter(!str_detect(var, "Unknown"))%>%
+  mutate(newdiag_b = indicator_hbv_6c_hbv_new_diagnosis_rate * 100)
+
+#breaks <- data.frame(breakdown = c("Age group", "Gender", "Ethnic group", "IMD", "Total"))
+
+hbv_pos <- hbv_pos %>%
+  #bind_rows(breaks) %>%
+  left_join(var_list, by = c("breakdown", "var")) %>%
+  arrange(breakdown)
+
+hbv_pos$var2 <- str_wrap(hbv_pos$var, width = 14)
+
+hbv_pos2 <- hbv_pos %>%
+  filter(var != "All") %>%
+  select(breakdown, var,newdiag_b, var_order) %>%
+  arrange(-var_order)
+```
+
+```{r fig5 graph}
+fig5_hbv_pos <- ggplot(
+  hbv_pos2, 
+  aes(x = newdiag_b, 
+      y = var)) +
+  geom_col(fill = "#00414d") +
+  labs(x = "Percentage newly diagnosed with HBV (%)", y = "") +
+  scale_y_discrete(limits = c("5", "4", "3", "2", "1", "NA", "White Other", "White British", 
+                              "Other", "Mixed/Multiple", "Indian, Pakistani or Bangladeshi",
+                              "Black Other", "Black Caribbean", "Black African", "Asian Other", "NA",
+                              "80 and over", "65 to 79", "50 to 64", "35 to 49", "25 to 34",
+                              "16 to 24", "NA", "Men", "Women"), 
+                   labels = c("IMD quintile 5: least deprived", "4", "3", "2", "IMD quintile 1: most deprived", "", "White other", "White British", 
+                              "Other", "Mixed or multiple", "Indian, Pakistani or Bangladeshi",
+                              "Black other", "Black Caribbean", "Black African", "Asian other", "",
+                              "80 and over", "65 to 79", "50 to 64", "35 to 49", "25 to 34",
+                              "16 to 24", "", "Men", "Women")) +
+  scale_x_continuous(expand = c(0,0)) +
+  theme_ukhsa() +
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "#e0e0e0")
+  )
+
+fig5_hbv_pos
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig5_hbv_newpos.svg",
+#   plot = fig5_hbv_pos,
+#   width = 960,
+#   height = 800,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig5_hbv_newpos.jpg",
+#   plot = fig5_hbv_pos,
+#   width = 960,
+#   height = 800,
+#   units = "px",
+#   dpi = 72
+# )
+```
+
+## Figure 6: New HCV diagnosis rate by demographics
+```{r fig6 data}
+hcv_pos <- joined_table1 %>%
+  select(breakdown, var, indicator_hcv_6b_hcv_new_diagnosis_rate) %>%
+  filter(!str_detect(var, "Unknown"))%>%
+  mutate(newdiag_c = indicator_hcv_6b_hcv_new_diagnosis_rate * 100)
+
+#breaks <- data.frame(breakdown = c("Age group", "Gender", "Ethnic group", "IMD", "Total"))
+
+hcv_pos <- hcv_pos %>%
+  #bind_rows(breaks) %>%
+  left_join(var_list, by = c("breakdown", "var")) %>%
+  arrange(breakdown)
+
+hcv_pos$var2 <- str_wrap(hcv_pos$var, width = 14)
+
+hcv_pos2 <- hcv_pos %>%
+  filter(var != "All") %>%
+  select(breakdown, var, newdiag_c, var_order) %>%
+  arrange(-var_order)
+```
+
+```{r fig6 graph}
+fig6_hcv_pos <- ggplot(
+  hcv_pos2, 
+  aes(x = newdiag_c, 
+      y = var)) +
+  geom_col(fill = "#00414d") +
+  labs(x = "Percentage newly diagnosed with HCV (%)", y = "") +
+  scale_y_discrete(limits = c("5", "4", "3", "2", "1", "NA", "White Other", "White British", 
+                              "Other", "Mixed/Multiple", "Indian, Pakistani or Bangladeshi",
+                              "Black Other", "Black Caribbean", "Black African", "Asian Other", "NA",
+                              "80 and over", "65 to 79", "50 to 64", "35 to 49", "25 to 34",
+                              "16 to 24", "NA", "Men", "Women"), 
+                   labels = c("IMD quintile 5: least deprived", "4", "3", "2", "IMD quintile 1: most deprived", "", "White other", "White British", 
+                              "Other", "Mixed or multiple", "Indian, Pakistani or Bangladeshi",
+                              "Black other", "Black Caribbean", "Black African", "Asian other", "",
+                              "80 and over", "65 to 79", "50 to 64", "35 to 49", "25 to 34",
+                              "Age 16 to 24", "", "Men", "Women")) +
+  scale_x_continuous(expand = c(0,0)) +
+  #xlim(0, 0.3) +
+  theme_ukhsa() +
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "#e0e0e0")
+  )
+
+fig6_hcv_pos
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig6_hcv_newpos.svg",
+#   plot = fig6_hcv_pos,
+#   width = 960,
+#   height = 800,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig6_hcv_newpos.jpg",
+#   plot = fig6_hcv_pos,
+#   width = 960,
+#   height = 800,
+#   units = "px",
+#   dpi = 72
+# )
+```
+
+## Figure 7: New HIV diagnosis rate by demographics
+```{r fig7 data}
+var_list <- read_csv(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/var_list.csv"
+)
+
+hiv_pos <- joined_table1 %>%
+  select(breakdown, var, indicator_hiv_6a_hiv_new_diagnosis_rate) %>%
+  filter(!str_detect(var, "Unknown")) %>%
+  mutate(newdiag_p = indicator_hiv_6a_hiv_new_diagnosis_rate * 100)
+
+#breaks <- data.frame(breakdown = c("Age group", "Gender", "Ethnic group", "IMD", "Total"))
+
+hiv_pos <- hiv_pos %>%
+  #bind_rows(breaks) %>%
+  left_join(var_list, by = c("breakdown", "var")) %>%
+  arrange(breakdown)
+
+hiv_pos$var2 <- str_wrap(hiv_pos$var, width = 14)
+
+hiv_pos2 <- hiv_pos %>%
+  filter(var != "All") %>%
+  select(breakdown, var, newdiag_p, var_order) %>%
+  arrange(-var_order)
+```
+
+```{r fig7 graph}
+fig7_hiv_pos <- ggplot(
+  hiv_pos2, 
+  aes(x = newdiag_p, 
+      y = var)) +
+  geom_col(fill = "#00414d") +
+  labs(x = "Percentage newly diagnosed with HIV (%)", y = "") +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_discrete(limits = c("5", "4", "3", "2", "1", "NA", "White Other", "White British", 
+                              "Other", "Mixed/Multiple", "Indian, Pakistani or Bangladeshi",
+                              "Black Other", "Black Caribbean", "Black African", "Asian Other", "NA",
+                              "80 and over", "65 to 79", "50 to 64", "35 to 49", "25 to 34",
+                              "16 to 24", "NA", "Men", "Women"), 
+                   labels = c("IMD quintile 5: least deprived", "4", "3", "2", "IMD quintile 1: most deprived", "", "White other", "White British", 
+                              "Other", "Mixed or multiple", "Indian, Pakistani or Bangladeshi",
+                              "Black other", "Black Caribbean", "Black African", "Asian other", "",
+                              "80 and over", "65 to 79", "50 to 64", "35 to 49", "25 to 34",
+                              "Age 16 to 24", "", "Men", "Women")) +
+  #xlim(0, 0.3) +
+  theme_ukhsa() +
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.ticks.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_line(color = "#e0e0e0")
+  )
+
+fig7_hiv_pos
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig7_hiv_newpos.svg",
+#   plot = fig7_hiv_pos,
+#   width = 960,
+#   height = 800,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig7_hiv_newpos.jpg",
+#   plot = fig7_hiv_pos,
+#   width = 960,
+#   height = 800,
+#   units = "px",
+#   dpi = 72
+# )
+```
+
+## Figure 8: Percentages of patients diagnosed with HIV by linkage outcomes
+```{r fig8 data}
+var_list <- read_csv(
+  "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/var_list.csv"
+)
+
+hiv_diags <- joined_table2 %>%
+  select(breakdown, var, number_of_patients_who_test_positive_for_hiv_2022_only, new_hiv_diagnosis_2022_only) %>%
+  filter(!str_detect(var, "Unknown")) %>%
+  mutate(new_diag_p = new_hiv_diagnosis_2022_only / number_of_patients_who_test_positive_for_hiv_2022_only * 100) 
+
+#breaks <- data.frame(breakdown = c("Age group", "Gender", "Ethnic group", "IMD", "Total"))
+
+hiv_diags <- hiv_diags %>%
+#bind_rows(breaks) %>%
+left_join(var_list, by = c("breakdown", "var")) %>%
+arrange(breakdown)
+
+hiv_diags$var2 <- str_wrap(hiv_diags$var, width = 14)
+
+test <- hiv_diags %>%
+filter(var != "All") %>%
+select(breakdown, var, new_hiv_diagnosis_2022_only, var_order) %>%
+arrange(-var_order)
+
+new_hiv_diagnoses <- hiv_diags %>%
+filter(var == "All") %>%
+rename(number = new_hiv_diagnosis_2022_only) %>%
+mutate(outcome = "Total new diagnoses") %>%
+select(outcome, number)
+
+hiv_linkage <- joined_table3 %>%
+select(
+  number_of_newly_diagnosed_hiv_positive_patients_linked_to_care_within_14_days,
+  number_of_newly_diagnosed_hiv_positive_patients_linked_to_care_within_30_days,
+  number_of_hiv_positive_patients_who_were_previously_but_not_currently_in_care_who_attend_care_within_30_days_of_positive_hiv_test,
+  number_of_patients_who_were_previously_but_not_currently_in_care_who_attend_within_90_days_of_positive_test,
+  number_of_patients_who_test_positive_for_hiv_who_were_previously_in_care_and_no_longer_attend_hiv_services
+) %>%
+  gather(
+    outcome,
+    number, 
+    number_of_newly_diagnosed_hiv_positive_patients_linked_to_care_within_14_days:number_of_patients_who_test_positive_for_hiv_who_were_previously_in_care_and_no_longer_attend_hiv_services) %>%
+  select(outcome, number)
+
+hiv_linkage <- hiv_linkage %>%
+bind_rows(new_hiv_diagnoses) %>%
+mutate(outcome = recode(outcome,
+  "number_of_patients_who_test_positive_for_hiv_who_were_previously_in_care_and_no_longer_attend_hiv_services" = "Previously diagnosed and not in care",
+  "number_of_newly_diagnosed_hiv_positive_patients_linked_to_care_within_14_days" = "Newly diagnosed and linked to care (14 days)",
+  "number_of_newly_diagnosed_hiv_positive_patients_linked_to_care_within_30_days" = "Newly diagnosed and linked to care (30 days)",
+  "number_of_hiv_positive_patients_who_were_previously_but_not_currently_in_care_who_attend_care_within_30_days_of_positive_hiv_test" = "Previously diagnosed and reengaged (30 days)",
+  "number_of_patients_who_were_previously_but_not_currently_in_care_who_attend_within_90_days_of_positive_test" = "Previously diagnosed and reengaged (90 days)"
+),
+outcome_order = case_when(
+  outcome == "Total new diagnoses" ~ 1,
+  outcome == "Previously diagnosed and not in care" ~ 4,
+  outcome == "Newly diagnosed and linked to care (14 days)" ~ 2,
+  outcome == "Newly diagnosed and linked to care (30 days)" ~ 3,
+  outcome == "Previously diagnosed and reengaged (30 days)" ~ 5,
+  outcome == "Previously diagnosed and reengaged (90 days)" ~ 6
+),
+color.group = case_when(outcome_order %in% c(1, 2, 3) ~ "group1",
+outcome_order %in% c(4, 5, 6) ~ "group2"))
+
+hiv_linkage$outcome2 <- str_wrap(hiv_linkage$outcome, width = 14)
+```
+
+```{r fig8 graph}
+fig8_hiv_linkage <- ggplot(hiv_linkage, aes(x = reorder(outcome2, outcome_order), y = number)) +
+geom_col(aes(fill = reorder(outcome2, outcome_order))) +
+scale_y_continuous(expand = c(0,0)) +
+scale_fill_manual(values = pal6) +
+labs(x = "HIV positive patients", y = "Number of patients") +
+geom_text(aes(label = number, color = color.group), size = 8, fontface = "bold", nudge_y = -4) +
+scale_color_manual(values = c('black', 'white'))+
+theme_ukhsa() +
+theme(legend.position = "none", 
+axis.title.x = element_text(vjust = -2),
+axis.ticks.x = element_blank())
+
+fig8_hiv_linkage
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig8_hiv_linkage.svg",
+#   plot = fig8_hiv_linkage,
+#   width = 1200,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig8_hiv_linkage.jpg",
+#   plot = fig8_hiv_linkage,
+#   width = 1200,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+```
+
+## Figure 9: Percentages of patients diagnosed with HCV by linkage outcomes
+```{r fig9 data}
+hcv_linkage <- joined_table3 %>%
+select(
+  new_rna_positives,
+  newly_diagnosed_and_linked_to_care_all,
+  newly_diagnosed_and_linked_to_care_28_days,
+  previously_diagnosed_and_not_currently_in_care,
+  reengaged_all,
+  reengaged_28_days
+) %>%
+  gather(
+    outcome,
+    number, 
+    new_rna_positives:reengaged_28_days) %>%
+  select(outcome, number)
+
+hcv_linkage <- hcv_linkage %>%
+mutate(outcome = recode(outcome,
+  "new_rna_positives" = "New HCV diagnoses",
+  "newly_diagnosed_and_linked_to_care_all" = "Newly diagnosed and linked to care (all)",
+  "newly_diagnosed_and_linked_to_care_28_days" = "Newly diagnosed and linked to care (28 days)",
+  "previously_diagnosed_and_not_currently_in_care" = "Previously diagnosed and not currently in care",
+  "reengaged_all" = "Previously diagnosed and reengaged (all)",
+  "reengaged_28_days" = "Previously diagnosed and reengaged (28 days)"
+),
+outcome_order = case_when(
+  outcome == "New HCV diagnoses" ~ 1,
+  outcome == "Newly diagnosed and linked to care (all)" ~ 2,
+  outcome == "Newly diagnosed and linked to care (28 days)" ~ 3,
+  outcome == "Previously diagnosed and not currently in care" ~ 4,
+  outcome == "Previously diagnosed and reengaged (all)" ~ 5,
+  outcome == "Previously diagnosed and reengaged (28 days)" ~ 6
+),
+color.group = case_when(outcome_order %in% c(1, 2, 3) ~ "group1",
+outcome_order %in% c(4, 5, 6) ~ "group2"))
+
+hcv_linkage$outcome2 <- str_wrap(hcv_linkage$outcome, width = 14)
+```
+
+```{r fig9 graph}
+fig9_hcv_linkage <- ggplot(hcv_linkage, aes(x = reorder(outcome2, outcome_order), y = number)) +
+geom_col(aes(fill = reorder(outcome2, outcome_order))) +
+scale_fill_manual(values = pal6) +
+scale_y_continuous(expand=c(0,0)) +
+labs(x = "HCV positive patients", y = "Number of patients") +
+geom_text(aes(label = number, color = color.group), size = 8, fontface = "bold", nudge_y = -4) +
+scale_color_manual(values = c("black", "white")) +
+theme_ukhsa() +
+theme(legend.position = "none", 
+axis.title.x = element_text(vjust = -2),
+axis.ticks.x = element_blank())
+fig9_hcv_linkage
+
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig9_hcv_linkage.svg",
+#   plot = fig9_hcv_linkage,
+#   width = 1200,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+# 
+# ggsave(
+#   "//COLHPAFIL003.HPA.org.uk/ProjectData/IMDATA/Hepatitis/Evaluations/ED opt out BBV testing evaluation/Analysis/graphs_wip/fig9_hcv_linkage.jpg",
+#   plot = fig9_hcv_linkage,
+#   width = 1200,
+#   height = 640,
+#   units = "px",
+#   dpi = 72
+# )
+```
+

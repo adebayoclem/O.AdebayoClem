@@ -1,0 +1,270 @@
+---
+title: "Data exploration"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Instructions
+For each site, compare our numbers for ED attendances, attendances with blood tests, BBV tests and diagnoses (produced from several SQL scripts) with those from the NHSE data dashboard to check data quality – by site
+	Planned output: automated report
+	Currently in Excel form – but need to separate out the groups to make it easier to look at
+	Deadline: end of Feb
+
+The SOP is here:
+  20230904SOP_ED_data_analysis.docx
+
+The scripts that link the ECDS data to the EmergencyDepartment_tests data are named 1 to 10 as 1_make_12monthECDS, 2_make_12monthECDSattendances…etc. They are all in the repo and will be explained in the SOP once it’s finalised. 
+
+## Setup
+```{r packages}
+pacman::p_load(
+    pacman,
+    tidyverse,
+    lubridate,
+    readxl,
+    DBI,
+    odbc,
+    arrow
+)
+```
+```{r connection}
+#ESTABLISH ODBC CONNECTION WITH DATA
+Y006 <- odbc::dbConnect(odbc::odbc(),
+                        .connection_string = "driver={SQL Server};server=SQLClusColLK19\\Lake19;
+                             database=Y006_BBV_PID;
+                             Encrypt=true;trusted_connection=true",
+                        timeout = 60,
+                        timezone = Sys.timezone(),
+                        timezone_out = Sys.timezone())
+```
+
+## All sites
+```{r ED attendances}
+# load attendances data (takes about 30 mins)
+attendances <- DBI::dbGetQuery(conn = Y006 , statement = "
+SELECT [SITE], 
+[ECDS_bloods_any], 
+[included_sites], 
+[Sentinel_sites], 
+[HIV], 
+[HCV], 
+[HBV]
+FROM [Y006_BBV_PID].[dbo].[12monthECDSattendances]
+WHERE (ARRIVAL_DATE <= '2023-04-07')"
+)
+```
+
+### attendances count
+```{r ED attendances table}
+attendances_tbl <- attendances %>% 
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+  rename(attendances = n)
+```
+
+### attendances with blood test count
+```{r ED attendances with blood tests table}
+attendances_blood_test_tbl <- attendances %>% 
+filter(ECDS_bloods_any == "bloods_any") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_blood_test = n)
+```
+
+### attendances with HIV test count
+```{r ED attendances with HIV test table}
+attendances_HIV_test_tbl <- attendances %>% 
+filter(HIV == "Yes") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_HIV_test = n)
+```
+
+### attendances with HCV test count
+```{r ED attendances with HCV test table}
+attendances_HCV_test_tbl <- attendances %>% 
+filter(HCV == "Yes") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_HCV_test = n)
+```
+
+### attendances with HBV test count
+```{r ED attendances with HBV test table}
+attendances_HBV_test_tbl <- attendances %>% 
+filter(HBV == "Yes") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_HBV_test = n)
+```
+
+## included sites
+
+```{r ED attendances included sites}
+# load attendances data (takes about 30 mins)
+included_sites <- DBI::dbGetQuery(conn = Y006 , statement = "
+SELECT [SITE], 
+[ECDS_bloods_any], 
+[included_sites], 
+[Sentinel_sites], 
+[HIV], 
+[HCV], 
+[HBV]
+FROM [Y006_BBV_PID].[dbo].[12monthECDSincluded_sitesudedsites]
+WHERE (ARRIVAL_DATE <= '2023-04-07') and (included_sites = 'Yes')"
+) %>%
+mutate(HIV = if_else(HIV == "Yes", HIV, "No", "No"),
+HCV = if_else(HCV == "Yes", HCV, "No", "No"),
+HBV = if_else(HCV == "Yes", HBV, "No", "No")
+)
+```
+
+### site list
+```{r site list}
+site_list <- included_sites_tbl %>%
+select(SITE) %>%
+mutate(col = 0)
+```
+
+### attendances count
+```{r ED attendances incl table}
+included_sites_tbl <- included_sites %>% 
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+  rename(attendances = n)
+```
+
+### attendances with blood test count
+```{r ED attendances incl with blood tests table}
+included_sites_blood_test_tbl <- included_sites %>% 
+filter(ECDS_bloods_any == "bloods_any") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_blood_test = n)
+```
+
+### attendances with HIV test count
+```{r ED attendances incl with HIV test table}
+included_sites_HIV_test_tbl <- included_sites %>% 
+filter(HIV == "Yes") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_HIV_test = n)
+```
+
+### attendances with HCV test count
+```{r ED attendances incl with HCV test table}
+included_sites_HCV_test_tbl <- included_sites %>% 
+filter(HCV == "Yes") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_HCV_test = n)
+```
+
+### attendances with HBV test count
+```{r ED attendances incl with HBV test table}
+included_sites_HBV_test_tbl <- included_sites %>% 
+filter(HBV == "Yes") %>%
+  group_by(SITE) %>%
+  tally() %>% 
+  collect() %>%
+rename(attendances_HBV_test = n)
+```
+
+### join tables
+```{r join included sites tables}
+included_sites_all_numbers <- left_join(
+  included_sites_tbl,
+  included_sites_blood_test_tbl,
+  by = "SITE"
+) %>%
+left_join(
+  included_sites_HBV_test_tbl,
+  by = "SITE") %>%
+  mutate(
+    attendances_HBV_test = ifelse(is.na(attendances_HBV_test), 0, attendances_HBV_test)
+  ) %>%
+left_join(
+  included_sites_HCV_test_tbl,
+  by = "SITE"
+) %>%
+mutate(
+    attendances_HCV_test = ifelse(is.na(attendances_HCV_test), 0, attendances_HCV_test)
+  ) %>%
+left_join(
+  included_sites_HIV_test_tbl,
+  by = "SITE"
+) %>% 
+mutate(
+    attendances_HIV_test = ifelse(is.na(attendances_HIV_test), 0, attendances_HIV_test)
+  )
+```
+
+### Sentinel sites
+```{r ED attendances sentinel sites}
+attendances_sentinel <- included_sites %>%
+filter(Sentinel_sites == "Yes")
+```
+
+### 5 sites
+```{r ED attendees}
+# load HIV attendees data from Sentinel
+attendees_HIV <- DBI::dbGetQuery(conn = Y006 , statement = "
+SELECT *
+FROM [Y006_BBV_PID].[dbo].[12mthECDSattendees_included5sitesHIV]
+WHERE (arrdate <= '2023-04-07')"
+)
+
+# load HCV attendees data from Sentinel
+attendees_HCV <- DBI::dbGetQuery(conn = Y006 , statement = "
+SELECT *
+FROM [Y006_BBV_PID].[dbo].[12mthECDSattendees_included5sitesHCV]
+WHERE (arrdate <= '2023-04-07')"
+)
+
+# load HBV attendees data from Sentinel
+attendees_HBV <- DBI::dbGetQuery(conn = Y006 , statement = "
+SELECT *
+FROM [Y006_BBV_PID].[dbo].[12mthECDSattendees_included5sitesHBV]
+WHERE (arrdate <= '2023-04-07')"
+)
+```
+```{r make tables}
+table1 <- attendees_HIV %>% 
+  group_by(Site) %>%
+  tally() %>% 
+  collect() %>%
+  mutate(go_live_date = "HIV")
+
+table2 <- attendees_HCV %>%
+rename(Site = SITE) %>%
+group_by(Site) %>% 
+  tally() %>% 
+  collect() %>%
+  mutate(go_live_date = "HCV")
+
+table3 <- attendees_HBV %>%
+group_by(Site) %>% 
+  tally() %>% 
+  collect() %>%
+  mutate(go_live_date = "HBV")
+
+attendees_tbl_5_sites <- bind_rows(
+    table1,
+    table2,
+    table3
+)
+```
+
