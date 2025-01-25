@@ -90,48 +90,6 @@ walk(
 
 
 
-``` {r site-code-list}
-# Define site codes for hospitals
-site_codes <- list(
-  "Newham General Hospital" = "R1HNH",
-  "Homerton University Hospital" = "RQXM1",
-  "St Thomas' Hospital" = "RJ122",
-  "The Royal London Hospital" = "R1H12",
-  "Whipps Cross University Hospital" = "R1HKH",
-  "King George Hospital" = "RF4DG",
-  "Charing Cross Hospital" = "RYJ02",
-  "Croydon University Hospital" = "RJ611",
-  "Blackpool Victoria Hospital" = "RXL01",
-  "King's College Hospital" = "RJZ01",
-  "Manchester Royal Infirmary" = "R0A02",
-  "North Manchester General Hospital" = "R0A66",
-  "Queen Elizabeth Hospital" = "RJ231",
-  "University Hospital Lewisham" = "RJ224",
-  "North Middlesex Hospital" = "RAPNM",
-  "Salford Royal Hospital" = "RMC10",
-  "Barnet Hospital" = "RAL26",
-  "Royal Free Hospital" = "RAL01",
-  "The Whittington Hospital" = "RKEQ4",
-  "Queen's Hospital" = "RF4QH",
-  "Chelsea & Westminster Hospital" = "RQM01",
-  "Ealing Hospital" = "R1K04",
-  "Hillingdon Hospital" = "RAS01",
-  "Epsom Hospital" = "RVR50",
-  "Kingston Hospital" = "RAX01",
-  "St Helier Hospital" = "RVR05",
-  "Princess Royal University Hospital" = "RJZ30",
-  "Northwick Park Hospital" = "R1K01",
-  "Royal Sussex County Hospital" = "E0A3H",
-  "St George's Hospital (Tooting)" = "RJ701",
-  "St Mary's Hospital" = "RYJ01",
-  "University College Hospital" = "RRV03",
-  "West Middlesex University Hospital" = "RQM91",
-  "Wythenshawe Hospital" = "R0A07"
-  
-)
-
-```
-
 
 ``` {r load-data}
 # Load site code based on the provided site name
