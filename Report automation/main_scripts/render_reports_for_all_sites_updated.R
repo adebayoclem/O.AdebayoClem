@@ -5,21 +5,19 @@ library(fs)
 library(here)
 
 # Load the Excel file with site codes and names
-site_codes_path <- here("trust reports", "report_data", "sitecodelookup.xlsx")
+site_codes_path <- here("reports", "data", "site_lookup.xlsx")
 site_code_to_name <- readxl::read_excel(site_codes_path, col_names = TRUE)
 
 # Clean column names if necessary
 site_code_to_name <- site_code_to_name %>%
-  rename(site_code = `Site ODS code`, site_name = `Hospital`)  # Adjust column names as they appear in the Excel file
+  rename(site_code = `Site_Code`, site_name = `Site_Name`)  # Adjust column names as they appear in the Excel file
 
 # Load the CSV file with inclusion flags
-included_sites_df <- read.csv(here("trust reports", "report_data", "included_sites.csv"))
-
+included_sites_df <- read.csv(here("reports", "data", "included_sites.csv"))
 
 # Join to match site names with site codes
 included_sites_df <- included_sites_df %>%
-  dplyr::left_join(site_code_to_name, by = "site_code")
-
+  left_join(site_code_to_name, by = "site_code")
 
 # Function to render reports for all eligible sites
 render_reports_for_all_sites <- function(included_sites_df, rmd_file, output_folder_base) {
@@ -27,19 +25,19 @@ render_reports_for_all_sites <- function(included_sites_df, rmd_file, output_fol
     site_name <- included_sites_df$site_name[i]
     site_code <- included_sites_df$site_code[i]
     
-    # Only proceed if any criteria are met
+    # Only proceed if any inclusion flag is "YES" (columns 3 onward)
     if (any(included_sites_df[i, 3:ncol(included_sites_df)] == "YES")) {
       params_list <- list(
         site_name = site_name,
         data_date = data_date,  # Use current date or a specific date as needed
         include_Attendance = included_sites_df$include_Attendance[i] == "YES",
         include_Blood_test = included_sites_df$include_Blood_test[i] == "YES",
-        include_HIV_test = included_sites_df$include_HIV_test[i] == "YES",
-        include_HCV_test = included_sites_df$include_HCV_test[i] == "YES",
-        include_HBV_test = included_sites_df$include_HBV_test[i] == "YES",
-        include_HCV_diagnosis = included_sites_df$include_HCV_diagnosis[i] == "YES",
-        include_HBV_diagnosis = included_sites_df$include_HBV_diagnosis[i] == "YES",
-        include_HIV_diagnosis = included_sites_df$include_HIV_diagnosis[i] == "YES",
+        include_Virus1_test = included_sites_df$include_Virus1_test[i] == "YES",
+        include_Virus3_test = included_sites_df$include_Virus3_test[i] == "YES",
+        include_Virus2_test = included_sites_df$include_Virus2_test[i] == "YES",
+        include_Virus3_diagnosis = included_sites_df$include_Virus3_diagnosis[i] == "YES",
+        include_Virus2_diagnosis = included_sites_df$include_Virus2_diagnosis[i] == "YES",
+        include_Virus1_diagnosis = included_sites_df$include_Virus1_diagnosis[i] == "YES",
         site_code = site_code
       )
       
@@ -61,6 +59,7 @@ render_reports_for_all_sites <- function(included_sites_df, rmd_file, output_fol
   }
 }
 
+# Function to test rendering for one site
 test_render_for_one_site <- function(site_name, included_sites_df, rmd_file, output_folder_base) {
   # Trim whitespace and convert to uppercase for comparison
   site_name_clean <- stringr::str_trim(stringr::str_to_upper(site_name))
@@ -80,12 +79,12 @@ test_render_for_one_site <- function(site_name, included_sites_df, rmd_file, out
       data_date = data_date,
       include_Attendance = specific_site_df$include_Attendance[i] == "YES",
       include_Blood_test = specific_site_df$include_Blood_test[i] == "YES",
-      include_HIV_test = specific_site_df$include_HIV_test[i] == "YES",
-      include_HCV_test = specific_site_df$include_HCV_test[i] == "YES",
-      include_HBV_test = specific_site_df$include_HBV_test[i] == "YES",
-      include_HCV_diagnosis = specific_site_df$include_HCV_diagnosis[i] == "YES",
-      include_HBV_diagnosis = specific_site_df$include_HBV_diagnosis[i] == "YES",
-      include_HIV_diagnosis = specific_site_df$include_HIV_diagnosis[i] == "YES",
+      include_Virus1_test = specific_site_df$include_Virus1_test[i] == "YES",
+      include_Virus3_test = specific_site_df$include_Virus3_test[i] == "YES",
+      include_Virus2_test = specific_site_df$include_Virus2_test[i] == "YES",
+      include_Virus3_diagnosis = specific_site_df$include_Virus3_diagnosis[i] == "YES",
+      include_Virus2_diagnosis = specific_site_df$include_Virus2_diagnosis[i] == "YES",
+      include_Virus1_diagnosis = specific_site_df$include_Virus1_diagnosis[i] == "YES",
       site_code = specific_site_df$site_code[i]
     )
     
@@ -110,16 +109,16 @@ test_render_for_one_site <- function(site_name, included_sites_df, rmd_file, out
 }
 
 # Define paths
-rmd_file <- here("trust reports", "main_scripts", "Site_Level_Report_April.Rmd")
-output_folder_base <- here("trust reports", "Results")
-data_date <- "2024-03-31"  # Example, you can dynamically set this as needed
+rmd_file <- here("reports", "scripts", "Site_Level_Report_Generic.Rmd")
+output_folder_base <- here("reports", "Results")
+data_date <- "2024-03-31"  # Example; adjust as needed
 
-# call to render reports for all sites
+# Call to render reports for all sites
 render_reports_for_all_sites(included_sites_df, rmd_file, output_folder_base)
 
 # Test render for a single site
-test_site_name <- "Chelsea & Westminster Hospital"  # Replace with the site name you want to test
-#test_render_for_one_site(test_site_name, included_sites_df, rmd_file, output_folder_base) #remove comment to run
+test_site_name <- "Site A"  # Replace with the site name you want to test
+# test_render_for_one_site(test_site_name, included_sites_df, rmd_file, output_folder_base)
 
-
-#rm(list = ls())
+# Optionally clear the workspace
+# rm(list = ls())

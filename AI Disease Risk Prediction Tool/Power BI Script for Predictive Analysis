@@ -1,0 +1,60 @@
+# Connect Power BI to PostgreSQL
+# Enable PostgreSQL Connection
+# Extract & Transform Data in Power Query
+# Import Health Data for Analysis
+let
+    Source = PostgreSQL.Database("your_postgres_server", "health_db"),
+    HealthData = Source{[Schema="public", Item="health_records"]}[Data],
+    FilteredRows = Table.SelectRows(HealthData, each [age] > 18),  // Example: Filter Adults
+    ChangedTypes = Table.TransformColumnTypes(FilteredRows, {
+        {"age", Int64.Type}, 
+        {"bmi", type number}, 
+        {"blood_pressure", type number},
+        {"smoking_status", Int64.Type}, 
+        {"activity_level", type number}, 
+        {"region", type text},
+        {"risk_score", Int64.Type}
+    })
+in
+    ChangedTypes
+
+# Create Pattern Analysis & Forecasting in Power BI
+# Add Predictive Analytics Using Python
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from fbprophet import Prophet  # Install via 'pip install prophet'
+
+# Load data from Power BI
+df = dataset
+
+# Convert to datetime for forecasting
+df["record_date"] = pd.to_datetime(df["record_date"])
+
+# Aggregate risk score by region and date
+df_grouped = df.groupby(["region", "record_date"])["risk_score"].mean().reset_index()
+
+# Train Prophet Model per Region
+fig, ax = plt.subplots(figsize=(12, 6))
+
+for region in df_grouped["region"].unique():
+    df_region = df_grouped[df_grouped["region"] == region][["record_date", "risk_score"]]
+    df_region = df_region.rename(columns={"record_date": "ds", "risk_score": "y"})
+    
+    model = Prophet()
+    model.fit(df_region)
+    
+    future = model.make_future_dataframe(periods=30)  # Predict next 30 days
+    forecast = model.predict(future)
+
+    # Plot the trend per region
+    sns.lineplot(x=forecast["ds"], y=forecast["yhat"], label=f"Predicted: {region}", ax=ax)
+    sns.lineplot(x=df_region["ds"], y=df_region["y"], linestyle="dashed", label=f"Actual: {region}", ax=ax)
+
+ax.set_title("Disease Risk Forecast by Region")
+ax.set_xlabel("Date")
+ax.set_ylabel("Risk Score")
+plt.xticks(rotation=45)
+plt.legend()
+plt.show()
+
