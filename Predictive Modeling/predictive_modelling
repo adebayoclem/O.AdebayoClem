@@ -1,0 +1,142 @@
+--- View STI Trends by Province
+--- Shows monthly STI case trends by province to identify hotspots.
+SELECT 
+    province,
+    sti_type,
+    COUNT(*) AS case_count, 
+    DATE_TRUNC('month', date_diagnosed) AS diagnosis_month
+FROM 
+    sti_cases
+WHERE 
+    date_diagnosed >= CURRENT_DATE - INTERVAL '12 months'
+GROUP BY 
+    province, sti_type, diagnosis_month
+ORDER BY 
+    diagnosis_month DESC, case_count DESC;
+
+--- Identify High-Risk Age Groups
+--- Identifies age groups most affected by different STIs.
+SELECT 
+    CASE 
+        WHEN age BETWEEN 15 AND 24 THEN 'Teen & Young Adult (15-24)'
+        WHEN age BETWEEN 25 AND 39 THEN 'Adult (25-39)'
+        WHEN age BETWEEN 40 AND 60 THEN 'Middle Age (40-60)'
+        ELSE 'Senior (60+)'
+    END AS age_group,
+    sti_type,
+    COUNT(*) AS case_count
+FROM 
+    sti_cases
+GROUP BY 
+    age_group, sti_type
+ORDER BY 
+    case_count DESC;
+
+--- Risk Factors Distribution
+--- Displays risk factor distribution to understand high-risk populations
+SELECT 
+    risk_factor,
+    COUNT(*) AS total_cases,
+    ROUND(100.0 * COUNT(*) / (SELECT COUNT(*) FROM sti_cases), 2) AS percentage
+FROM 
+    sti_cases
+GROUP BY 
+    risk_factor
+ORDER BY 
+    total_cases DESC;
+
+--- Predictive Modeling: STI Spread Forecast
+--- Using 7-day moving averages and exponential growth trends, we model future outbreaks
+SELECT 
+    date_diagnosed, 
+    province, 
+    sti_type, 
+    COUNT(*) AS daily_cases,
+    AVG(COUNT(*)) OVER (
+        PARTITION BY province, sti_type 
+        ORDER BY date_diagnosed 
+        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ) AS moving_avg
+FROM 
+    sti_cases
+GROUP BY 
+    date_diagnosed, province, sti_type
+ORDER BY 
+    date_diagnosed DESC;
+
+--- Forecast Future Cases Using Exponential Growth Model
+--- Uses historical monthly trends to predict future case counts.
+WITH past_trend AS (
+    SELECT 
+        province, 
+        sti_type, 
+        DATE_TRUNC('month', date_diagnosed) AS diagnosis_month,
+        COUNT(*) AS monthly_cases,
+        LAG(COUNT(*)) OVER (PARTITION BY province, sti_type ORDER BY DATE_TRUNC('month', date_diagnosed)) AS prev_month_cases
+    FROM 
+        sti_cases
+    WHERE 
+        date_diagnosed >= CURRENT_DATE - INTERVAL '24 months'
+    GROUP BY 
+        province, sti_type, diagnosis_month
+)
+SELECT 
+    province, 
+    sti_type, 
+    diagnosis_month,
+    monthly_cases,
+    prev_month_cases,
+    ROUND((monthly_cases - prev_month_cases) * 1.2, 2) AS predicted_cases_next_month
+FROM 
+    past_trend
+ORDER BY 
+    diagnosis_month DESC;
+
+--- Geospatial & Hotspot Analysis
+--- Identifies provinces where STI cases are significantly higher
+SELECT 
+    province, 
+    COUNT(*) AS case_count
+FROM 
+    sti_cases
+GROUP BY 
+    province
+HAVING 
+    COUNT(*) > (SELECT AVG(case_count) * 1.5 FROM (SELECT COUNT(*) AS case_count FROM sti_cases GROUP BY province) AS avg_cases)
+ORDER BY 
+    case_count DESC;
+
+--- Contact Tracing & Network Analysis
+--- Percentage of Cases with Known Contact Tracing
+SELECT 
+    province,
+    sti_type,
+    ROUND(100.0 * SUM(CASE WHEN contact_tracing = 'Yes' THEN 1 ELSE 0 END) / COUNT(*), 2) AS contact_traced_percentage
+FROM 
+    sti_cases
+GROUP BY 
+    province, sti_type
+ORDER BY 
+    contact_traced_percentage DESC;
+
+--- Automated Alert System for Outbreak Detection
+--- Triggers an alert when cases exceed a 50% increase over the last month.
+SELECT 
+    province, 
+    sti_type, 
+    COUNT(*) AS current_month_cases,
+    LAG(COUNT(*)) OVER (PARTITION BY province, sti_type ORDER BY DATE_TRUNC('month', date_diagnosed)) AS prev_month_cases,
+    CASE 
+        WHEN COUNT(*) > LAG(COUNT(*)) OVER (PARTITION BY province, sti_type ORDER BY DATE_TRUNC('month', date_diagnosed)) * 1.5 
+        THEN 'ALERT: Outbreak Detected' 
+        ELSE 'Stable'
+    END AS outbreak_status
+FROM 
+    sti_cases
+WHERE 
+    date_diagnosed >= CURRENT_DATE - INTERVAL '12 months'
+GROUP BY 
+    province, sti_type, DATE_TRUNC('month', date_diagnosed)
+ORDER BY 
+    date_diagnosed DESC;
+

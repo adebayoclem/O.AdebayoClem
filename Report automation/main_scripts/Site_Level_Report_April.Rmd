@@ -3,7 +3,7 @@ title: "Site Level Report"
 date: "`r format(Sys.Date(), '%Y-%m-%d')`"
 output: html_document
 params:
-  site_name: "Default Site"
+  site_name: "Site A"            # Generic site name
   data_date: "2024-03-31"
   include_Attendance: FALSE
   include_Blood_test: FALSE
@@ -21,56 +21,54 @@ params:
 
 # Set global chunk options
 knitr::opts_chunk$set(
-  echo = FALSE,      # Hide code in output
-  error = FALSE,     # Show errors but don't stop rendering
-  warning = FALSE,   # Hide warnings in output
-  message = FALSE,   # Hide messages in output
-  fig.width = 14,    # Set figure width
-  fig.height = 16,   # Set figure height
-  fig.topcaption = TRUE  # Place figure captions at the top
+  echo = FALSE,
+  error = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 14,
+  fig.height = 16,
+  fig.topcaption = TRUE
 )
 
 # Ensure the "pacman" package is installed
 if (!require("pacman")) {
-  install.packages("pacman") }
+  install.packages("pacman")
+}
 
-# Load necessary packages using pacman
+# Load necessary packages
 pacman::p_load(
-  rio,        # For data import/export
-  here,       # For relative file paths
-  skimr,      # For summarizing data
-  janitor,    # For data cleaning
-  lubridate,  # For date handling
-  epikit,     # For epidemiological tools
-  tidyverse,  # For data manipulation and visualization
-  flextable,  # For creating pretty tables
-  scales,     # For scaling functions
-  gtsummary,  # For summary statistics and tables
-  arrow,      # For data interoperability
-  ggplot2,    # For data visualization
-  rlang,      # For programming tools
-  readxl,     # For reading Excel files
-  writexl,    # For writing Excel files
-  DBI,        # For database connections
-  odbc,       # For ODBC connections
-  purrr,      # For functional programming
-  rmarkdown,  # For dynamic document generation
-  ukhsacharts # For UKHSA chart formats
+  rio,
+  here,
+  skimr,
+  janitor,
+  lubridate,
+  epikit,
+  tidyverse,
+  flextable,
+  scales,
+  gtsummary,
+  arrow,
+  ggplot2,
+  rlang,
+  readxl,
+  writexl,
+  DBI,
+  odbc,
+  purrr,
+  rmarkdown
 )
 
-# Define UKHSA color palette
-blue_palette <- c("#00A5DF", "#007C91", "#1D57A5")  
+# Define a generic color palette
+generic_palette <- c("#00A5DF", "#007C91", "#1D57A5")
 
 ```
 
 
 
 ``` {r establish-connections}
-# Establish ODBC connection with the database
-Y006 <- odbc::dbConnect(odbc::odbc(),
-                        .connection_string = "driver={SQL Server};server=SQLClusColLK19\\Lake19;
-                             database=Y006_BBV_PID;
-                             Encrypt=true;trusted_connection=true",
+# Establish a generic ODBC connection (replace with your own credentials and DSN)
+db_connection <- odbc::dbConnect(odbc::odbc(),
+                        .connection_string = "driver={SQL Server};server=YOUR_SERVER;database=YOUR_DB;Encrypt=true;trusted_connection=true",
                         timeout = 300,
                         timezone = Sys.timezone(),
                         timezone_out = Sys.timezone())
@@ -79,11 +77,10 @@ Y006 <- odbc::dbConnect(odbc::odbc(),
 
 
 ``` {r load-data-source-code}
-# load all functions, which are in the R scripts in the report_functions folder
+# Load all helper functions stored in scripts (ensure the folder 'report_functions' exists in your working directory)
 walk(
-  # Apply a function to each element in a set of things
-  list.files(here("trust reports", "report_functions"), pattern = "\\.R$", full.names = TRUE), # Paths to each R script
-  source # Function that loads each script
+  list.files(here("reports", "functions"), pattern = "\\.R$", full.names = TRUE),
+  source
 )
 ```
 
@@ -92,50 +89,48 @@ walk(
 
 
 ``` {r load-data}
-# Load site code based on the provided site name
-site_code <- site_codes[[params$site_name]]
+# Load site code based on the provided site name from a generic lookup list (assumed preloaded in 'site_codes_generic')
+site_code <- site_codes_generic[[params$site_name]]
 if (is.null(site_code) || site_code == "") {
   stop("Site code is not available for the site name provided: ", params$site_name)
 }
 
-# Load and clean attendees data for HIV, HCV, and HBV
-attendees_HIV <- load_attendees_data(Y006, site_code, "HIV")
-attendees_HCV <- load_attendees_data(Y006, site_code, "HCV")
-attendees_HBV <- load_attendees_data(Y006, site_code, "HBV")
+# Load and clean attendees data for the viruses using generic helper functions
+attendees_V1 <- load_attendees_data(db_connection, site_code, "Virus1")
+attendees_V2 <- load_attendees_data(db_connection, site_code, "Virus2")
+attendees_V3 <- load_attendees_data(db_connection, site_code, "Virus3")
 
-attendees_HIV_1 <- clean_data(attendees_HIV)
-attendees_HCV_1 <- clean_data(attendees_HCV)
-attendees_HBV_1 <- clean_data(attendees_HBV)
+attendees_V1_clean <- clean_data(attendees_V1)
+attendees_V2_clean <- clean_data(attendees_V2)
+attendees_V3_clean <- clean_data(attendees_V3)
 
-# Check for NULL results and create empty dataframes if necessary
-if (is.null(attendees_HIV_1)) attendees_HIV_1 <- data.frame()
-if (is.null(attendees_HCV_1)) attendees_HCV_1 <- data.frame()
-if (is.null(attendees_HBV_1)) attendees_HBV_1 <- data.frame()
+# Create empty data frames if data are missing
+if (is.null(attendees_V1_clean)) attendees_V1_clean <- data.frame()
+if (is.null(attendees_V2_clean)) attendees_V2_clean <- data.frame()
+if (is.null(attendees_V3_clean)) attendees_V3_clean <- data.frame()
 
 ```
 
 
 ``` {r alternate-data-loading-all-sites}
 
-# Load data for each disease
-attendees_HIV_all <- load_all_ed_data(Y006, "HIV")
-attendees_HBV_all <- load_all_ed_data(Y006, "HBV")
-attendees_HCV_all <- load_all_ed_data(Y006, "HCV")
+# Load data across all sites for each virus type
+attendees_V1_all <- load_all_ed_data(db_connection, "Virus1")
+attendees_V2_all <- load_all_ed_data(db_connection, "Virus2")
+attendees_V3_all <- load_all_ed_data(db_connection, "Virus3")
 
-# Clean the data
-attendees_HIV_all_1 <- clean_data(attendees_HIV_all)
-attendees_HBV_all_1 <- clean_data(attendees_HBV_all)
-attendees_HCV_all_1 <- clean_data(attendees_HCV_all)
+# Clean the overall datasets
+attendees_V1_all_clean <- clean_data(attendees_V1_all)
+attendees_V2_all_clean <- clean_data(attendees_V2_all)
+attendees_V3_all_clean <- clean_data(attendees_V3_all)
 
 
 ```
 
 
 ```{r attendees-analysis}
-# Analyse characteristics of attendees for HIV
-
-attendees_characteristics_HIV <- attendees_characteristics(attendees_HIV_1)
-
+# Analyse characteristics for Virus1 attendees using a generic function
+attendees_characteristics_V1 <- attendees_characteristics(attendees_V1_clean)
 
 ```
 
@@ -143,221 +138,110 @@ attendees_characteristics_HIV <- attendees_characteristics(attendees_HIV_1)
 ```{r overall-ED-attendees}
 
 # Function to calculate total attendees for a given dataset
-calculate_totals_dataframe <- function(data, disease_type) {
+calculate_totals <- function(data, virus_type) {
   total_count <- if (!is.null(data) && nrow(data) > 0) nrow(data) else 0
-  return(data.frame(
-    Disease = disease_type,
+  data.frame(
+    Virus = virus_type,
     Total_Attendees_All_Sites = total_count,
     stringsAsFactors = FALSE
-  ))
+  )
 }
 
-# Generate totals for each disease
-totals_dataframe_HIV <- calculate_totals_dataframe(attendees_HIV_all_1, "HIV")
-totals_dataframe_HBV <- calculate_totals_dataframe(attendees_HBV_all_1, "HBV")
-totals_dataframe_HCV <- calculate_totals_dataframe(attendees_HCV_all_1, "HCV")
+# Generate totals for each virus type
+totals_V1 <- calculate_totals(attendees_V1_all_clean, "Virus1")
+totals_V2 <- calculate_totals(attendees_V2_all_clean, "Virus2")
+totals_V3 <- calculate_totals(attendees_V3_all_clean, "Virus3")
 
-# Generate overall characteristics using cleaned datasets
-overall_characteristics_HIV <- attendees_characteristics(attendees_HIV_all_1)
-overall_characteristics_HBV <- attendees_characteristics(attendees_HBV_all_1)
-overall_characteristics_HCV <- attendees_characteristics(attendees_HCV_all_1)
+# Overall characteristics for each virus type
+overall_characteristics_V1 <- attendees_characteristics(attendees_V1_all_clean)
+overall_characteristics_V2 <- attendees_characteristics(attendees_V2_all_clean)
+overall_characteristics_V3 <- attendees_characteristics(attendees_V3_all_clean)
 
 
 ```
 
 
 ```{r overall-blood-test-prop}
-# Calculate overall proportions of attendees tested for HIV across different demographics 
-overall_proportion_tested_by_age_HIV <- calculate_proportion_tested(attendees_HIV_all_1, "age_group")
-overall_proportion_tested_by_gender_HIV <- calculate_proportion_tested(attendees_HIV_all_1, "Gender")
-overall_proportion_tested_by_ethnic_group_HIV <- calculate_proportion_tested(attendees_HIV_all_1, "ethnic_group")
-overall_proportion_tested_by_IMD_HIV <- calculate_proportion_tested(attendees_HIV_all_1, "IMD")
+# Calculate overall proportions tested across demographics for Virus1 using a generic helper
+prop_tested_age_V1 <- calculate_proportion_tested(attendees_V1_all_clean, "age_group")
+prop_tested_gender_V1 <- calculate_proportion_tested(attendees_V1_all_clean, "Gender")
+prop_tested_ethnicity_V1 <- calculate_proportion_tested(attendees_V1_all_clean, "ethnic_group")
+prop_tested_IMD_V1 <- calculate_proportion_tested(attendees_V1_all_clean, "IMD")
 
-# Combine the calculated overall proportions for attendees tested for HIV
-overall_proportions_tested_HIV_1 <- bind_rows(
-  mutate(overall_proportion_tested_by_age_HIV, Demographic = "Age Group"),
-  mutate(overall_proportion_tested_by_gender_HIV, Demographic = "Gender"),
-  mutate(overall_proportion_tested_by_ethnic_group_HIV, Demographic = "Ethnic Group"),
-  mutate(overall_proportion_tested_by_IMD_HIV, Demographic = "IMD")
+# Combine proportions for Virus1
+overall_proportions_V1 <- bind_rows(
+  mutate(prop_tested_age_V1, Demographic = "Age Group"),
+  mutate(prop_tested_gender_V1, Demographic = "Gender"),
+  mutate(prop_tested_ethnicity_V1, Demographic = "Ethnic Group"),
+  mutate(prop_tested_IMD_V1, Demographic = "IMD")
 )
 
-# Calculate overall proportions of attendees tested for HBV across different demographics 
-overall_proportion_tested_by_age_HBV <- calculate_proportion_tested(attendees_HBV_all_1, "age_group")
-overall_proportion_tested_by_gender_HBV <- calculate_proportion_tested(attendees_HBV_all_1, "Gender")
-overall_proportion_tested_by_ethnic_group_HBV <- calculate_proportion_tested(attendees_HBV_all_1, "ethnic_group")
-overall_proportion_tested_by_IMD_HBV <- calculate_proportion_tested(attendees_HBV_all_1, "IMD")
-
-# Combine the calculated overall proportions for attendees tested for HBV
-overall_proportions_tested_HBV_1 <- bind_rows(
-  mutate(overall_proportion_tested_by_age_HBV, Demographic = "Age Group"),
-  mutate(overall_proportion_tested_by_gender_HBV, Demographic = "Gender"),
-  mutate(overall_proportion_tested_by_ethnic_group_HBV, Demographic = "Ethnic Group"),
-  mutate(overall_proportion_tested_by_IMD_HBV, Demographic = "IMD")
-)
-
-# Calculate overall proportions of attendees tested for HCV across different demographics 
-overall_proportion_tested_by_age_HCV <- calculate_proportion_tested(attendees_HCV_all_1, "age_group")
-overall_proportion_tested_by_gender_HCV <- calculate_proportion_tested(attendees_HCV_all_1, "Gender")
-overall_proportion_tested_by_ethnic_group_HCV <- calculate_proportion_tested(attendees_HCV_all_1, "ethnic_group")
-overall_proportion_tested_by_IMD_HCV <- calculate_proportion_tested(attendees_HCV_all_1, "IMD")
-
-# Combine the calculated overall proportions for attendees tested for HCV
-overall_proportions_tested_HCV_1 <- bind_rows(
-  mutate(overall_proportion_tested_by_age_HCV, Demographic = "Age Group"),
-  mutate(overall_proportion_tested_by_gender_HCV, Demographic = "Gender"),
-  mutate(overall_proportion_tested_by_ethnic_group_HCV, Demographic = "Ethnic Group"),
-  mutate(overall_proportion_tested_by_IMD_HCV, Demographic = "IMD")
-)
+# Repeat similar steps for Virus2 and Virus3 as needed...
 
 ```
 
 
 ```{r overall-prop-eligible-attendees}
-#HIV
-# Calculate overall demographic breakdowns for eligible attendees tested for HIV
-overall_eligible_demo_by_age_HIV <- calculate_eligible_tested(attendees_HIV_all_1, age_group, "HIV")
-overall_eligible_demo_by_gender_HIV <- calculate_eligible_tested(attendees_HIV_all_1, Gender, "HIV")
-overall_eligible_demo_by_ethnic_group_HIV <- calculate_eligible_tested(attendees_HIV_all_1, ethnic_group, "HIV")
-overall_eligible_demo_by_IMD_HIV <- calculate_eligible_tested(attendees_HIV_all_1, IMD, "HIV")
+# For Virus1: Calculate eligible attendees breakdown by demographics and their testing proportions
+eligible_demo_age_V1 <- calculate_eligible_tested(attendees_V1_all_clean, age_group, "Virus1")
+eligible_demo_gender_V1 <- calculate_eligible_tested(attendees_V1_all_clean, Gender, "Virus1")
+eligible_demo_ethnicity_V1 <- calculate_eligible_tested(attendees_V1_all_clean, ethnic_group, "Virus1")
+eligible_demo_IMD_V1 <- calculate_eligible_tested(attendees_V1_all_clean, IMD, "Virus1")
 
-# Combine all demographic breakdowns
-overall_combined_eligible_demographics_HIV <- bind_rows(
-  mutate(overall_eligible_demo_by_age_HIV, Demographic = "Age Group"),
-  mutate(overall_eligible_demo_by_gender_HIV, Demographic = "Gender"),
-  mutate(overall_eligible_demo_by_ethnic_group_HIV, Demographic = "Ethnic Group"),
-  mutate(overall_eligible_demo_by_IMD_HIV, Demographic = "IMD")
+overall_combined_eligible_V1 <- bind_rows(
+  mutate(eligible_demo_age_V1, Demographic = "Age Group"),
+  mutate(eligible_demo_gender_V1, Demographic = "Gender"),
+  mutate(eligible_demo_ethnicity_V1, Demographic = "Ethnic Group"),
+  mutate(eligible_demo_IMD_V1, Demographic = "IMD")
 )
 
-# Calculate proportions of eligible attendees tested for HIV across different demographics
-overall_proportions_HIV_tested_eligible_age <- proportion_tested_eligible(attendees_HIV_all_1, HIV, age_group)
-overall_proportions_HIV_tested_eligible_Gender <- proportion_tested_eligible(attendees_HIV_all_1, HIV, Gender)
-overall_proportions_HIV_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_HIV_all_1, HIV, ethnic_group)
-overall_proportions_HIV_tested_eligible_IMD <- proportion_tested_eligible(attendees_HIV_all_1, HIV, IMD)
+prop_eligible_age_V1 <- proportion_tested_eligible(attendees_V1_all_clean, Virus1, age_group)
+prop_eligible_gender_V1 <- proportion_tested_eligible(attendees_V1_all_clean, Virus1, Gender)
+prop_eligible_ethnicity_V1 <- proportion_tested_eligible(attendees_V1_all_clean, Virus1, ethnic_group)
+prop_eligible_IMD_V1 <- proportion_tested_eligible(attendees_V1_all_clean, Virus1, IMD)
 
-# Combine the calculated proportions for eligible attendees tested for HIV
-combined_overall_proportions_eligible_tested_HIV <- combine_and_prepare_eligible(
-  list(overall_proportions_HIV_tested_eligible_Gender, overall_proportions_HIV_tested_eligible_age, overall_proportions_HIV_tested_eligible_Ethnic_group, overall_proportions_HIV_tested_eligible_IMD),
+combined_prop_eligible_V1 <- combine_and_prepare_eligible(
+  list(prop_eligible_gender_V1, prop_eligible_age_V1, prop_eligible_ethnicity_V1, prop_eligible_IMD_V1),
   c("Gender", "Age Group", "Ethnic Group", "IMD")
 )
 
-
-#HBV
-# Calculate overall demographic breakdowns for eligible attendees tested for HBV
-overall_eligible_demo_by_age_HBV <- calculate_eligible_tested(attendees_HBV_all_1, age_group, "HBV")
-overall_eligible_demo_by_gender_HBV <- calculate_eligible_tested(attendees_HBV_all_1, Gender, "HBV")
-overall_eligible_demo_by_ethnic_group_HBV <- calculate_eligible_tested(attendees_HBV_all_1, ethnic_group, "HBV")
-overall_eligible_demo_by_IMD_HBV <- calculate_eligible_tested(attendees_HBV_all_1, IMD, "HBV")
-
-# Combine all demographic breakdowns
-overall_combined_eligible_demographics_HBV <- bind_rows(
-  mutate(overall_eligible_demo_by_age_HBV, Demographic = "Age Group"),
-  mutate(overall_eligible_demo_by_gender_HBV, Demographic = "Gender"),
-  mutate(overall_eligible_demo_by_ethnic_group_HBV, Demographic = "Ethnic Group"),
-  mutate(overall_eligible_demo_by_IMD_HBV, Demographic = "IMD")
-)
-
-# Calculate proportions of eligible attendees tested for HBV across different demographics
-overall_proportions_HBV_tested_eligible_age <- proportion_tested_eligible(attendees_HBV_all_1, HBV, age_group)
-overall_proportions_HBV_tested_eligible_Gender <- proportion_tested_eligible(attendees_HBV_all_1, HBV, Gender)
-overall_proportions_HBV_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_HBV_all_1, HBV, ethnic_group)
-overall_proportions_HBV_tested_eligible_IMD <- proportion_tested_eligible(attendees_HBV_all_1, HBV, IMD)
-
-# Combine the calculated proportions for eligible attendees tested for HBV
-combined_overall_proportions_eligible_tested_HBV <- combine_and_prepare_eligible(
-  list(overall_proportions_HBV_tested_eligible_Gender, overall_proportions_HBV_tested_eligible_age, overall_proportions_HBV_tested_eligible_Ethnic_group, overall_proportions_HBV_tested_eligible_IMD),
-  c("Gender", "Age Group", "Ethnic Group", "IMD")
-)
-
-#HCV
-# Calculate overall demographic breakdowns for eligible attendees tested for HCV
-overall_eligible_demo_by_age_HCV <- calculate_eligible_tested(attendees_HCV_all_1, age_group, "HCV")
-overall_eligible_demo_by_gender_HCV <- calculate_eligible_tested(attendees_HCV_all_1, Gender, "HCV")
-overall_eligible_demo_by_ethnic_group_HCV <- calculate_eligible_tested(attendees_HCV_all_1, ethnic_group, "HCV")
-overall_eligible_demo_by_IMD_HCV <- calculate_eligible_tested(attendees_HCV_all_1, IMD, "HCV")
-
-# Combine all demographic breakdowns
-overall_combined_eligible_demographics_HCV <- bind_rows(
-  mutate(overall_eligible_demo_by_age_HCV, Demographic = "Age Group"),
-  mutate(overall_eligible_demo_by_gender_HCV, Demographic = "Gender"),
-  mutate(overall_eligible_demo_by_ethnic_group_HCV, Demographic = "Ethnic Group"),
-  mutate(overall_eligible_demo_by_IMD_HCV, Demographic = "IMD")
-)
-
-# Calculate proportions of eligible attendees tested for HCV across different demographics
-overall_proportions_HCV_tested_eligible_age <- proportion_tested_eligible(attendees_HCV_all_1, HCV, age_group)
-overall_proportions_HCV_tested_eligible_Gender <- proportion_tested_eligible(attendees_HCV_all_1, HCV, Gender)
-overall_proportions_HCV_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_HCV_all_1, HCV, ethnic_group)
-overall_proportions_HCV_tested_eligible_IMD <- proportion_tested_eligible(attendees_HCV_all_1, HCV, IMD)
-
-# Combine the calculated proportions for eligible attendees tested for HCV
-combined_overall_proportions_eligible_tested_HCV <- combine_and_prepare_eligible(
-  list(overall_proportions_HCV_tested_eligible_Gender, overall_proportions_HCV_tested_eligible_age, overall_proportions_HCV_tested_eligible_Ethnic_group, overall_proportions_HCV_tested_eligible_IMD),
-  c("Gender", "Age Group", "Ethnic Group", "IMD")
-)
+# Similar processing can be repeated for Virus2 and Virus3 if required.
 
 ```
 
 
 ``` {r include-overall-HIV-diagnosis}
-# Define a function to check if all data frames in a list are empty
+# Example for diagnosis proportions for Virus1
+
+# Define helper to check if data frames in a list are empty
 all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HIV across different demographics for overall distribution
-overall_proportion_diagnosed_HIV_age <- proportion_diagnosed_HIV(attendees_HIV_all_1, "age_group") %>% mutate(Demographic = "Age Group")
-overall_proportion_diagnosed_HIV_gender <- proportion_diagnosed_HIV(attendees_HIV_all_1, "Gender") %>% mutate(Demographic = "Gender")
-overall_proportion_diagnosed_HIV_ethnic <- proportion_diagnosed_HIV(attendees_HIV_all_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-overall_proportion_diagnosed_HIV_IMD <- proportion_diagnosed_HIV(attendees_HIV_all_1, "IMD") %>% mutate(Demographic = "IMD")
+prop_diag_age_V1 <- proportion_diagnosed_V1(attendees_V1_all_clean, "age_group") %>% mutate(Demographic = "Age Group")
+prop_diag_gender_V1 <- proportion_diagnosed_V1(attendees_V1_all_clean, "Gender") %>% mutate(Demographic = "Gender")
+prop_diag_ethnic_V1 <- proportion_diagnosed_V1(attendees_V1_all_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+prop_diag_IMD_V1 <- proportion_diagnosed_V1(attendees_V1_all_clean, "IMD") %>% mutate(Demographic = "IMD")
 
-# Combine the individual data frames into a list
-overall_proportion_diagnosed_list_HIV <- list(
-  overall_proportion_diagnosed_HIV_age,
-  overall_proportion_diagnosed_HIV_gender,
-  overall_proportion_diagnosed_HIV_ethnic,
-  overall_proportion_diagnosed_HIV_IMD
-)
+prop_diag_list_V1 <- list(prop_diag_age_V1, prop_diag_gender_V1, prop_diag_ethnic_V1, prop_diag_IMD_V1)
 
-# Check if the list of data frames is empty or if all data frames inside are empty
-if (length(overall_proportion_diagnosed_list_HIV) == 0 || all_empty(overall_proportion_diagnosed_list_HIV)) {
-  overall_combined_Proportion_diagnosed_long_HIV <- data.frame()
+if (length(prop_diag_list_V1) == 0 || all_empty(prop_diag_list_V1)) {
+  combined_diag_V1 <- data.frame()
 } else {
-  # Proceed with combining data frames and further processing
-  overall_combined_Proportion_diagnosed_long_HIV <- bind_rows(overall_proportion_diagnosed_list_HIV) %>%
+  combined_diag_V1 <- bind_rows(prop_diag_list_V1) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
-# Check if the required columns exist and the data frame is not empty
-if ("new_diagnosis" %in% colnames(attendees_HIV_all_1) && nrow(attendees_HIV_all_1) > 0) {
-  
-  # Filter for newly diagnosed HIV cases
-  overall_attendees_HIV_new_diag <- attendees_HIV_all_1 %>% filter(new_diagnosis == "TRUE")
-  
-  if (nrow(overall_attendees_HIV_new_diag) > 0) {
-    # Count newly diagnosed HIV cases if any cases exist
-    overall_attendees_HIV_new_diag_long <- count_new_diag(overall_attendees_HIV_new_diag)
-  } else {
-    # If no newly diagnosed cases, return an empty data frame
-    overall_attendees_HIV_new_diag_long <- data.frame()
-  }
-  
+# Similarly, count new and previous diagnoses if columns exist
+if ("new_diagnosis" %in% colnames(attendees_V1_all_clean) && nrow(attendees_V1_all_clean) > 0) {
+  new_diag_V1 <- attendees_V1_all_clean %>% filter(new_diagnosis == "TRUE")
+  new_diag_V1_long <- if (nrow(new_diag_V1) > 0) count_new_diag(new_diag_V1) else data.frame()
 }
 
-# Check if the required column exists for previously diagnosed cases
-if ("not_retained" %in% colnames(attendees_HIV_all_1) && nrow(attendees_HIV_all_1) > 0) {
-  
-  # Filter for previously diagnosed HIV cases
-  overall_attendees_HIV_prev_diag <- attendees_HIV_all_1 %>% filter(not_retained == "TRUE")
-  
-  if (nrow(overall_attendees_HIV_prev_diag) > 0) {
-    # Count previously diagnosed HIV cases if any cases exist
-    overall_attendees_HIV_prev_diag_long <- count_new_diag(overall_attendees_HIV_prev_diag)
-  } else {
-    # If no previously diagnosed cases, return an empty data frame
-    overall_attendees_HIV_prev_diag_long <- data.frame()
-  }
-  
+if ("not_retained" %in% colnames(attendees_V1_all_clean) && nrow(attendees_V1_all_clean) > 0) {
+  prev_diag_V1 <- attendees_V1_all_clean %>% filter(not_retained == "TRUE")
+  prev_diag_V1_long <- if (nrow(prev_diag_V1) > 0) count_new_diag(prev_diag_V1) else data.frame()
 }
 
 ```
@@ -369,47 +253,47 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HCV across different demographics for overall distribution
-overall_proportion_diagnosed_HCV_age <- proportion_diagnosed_HCV(attendees_HCV_all_1, "age_group") %>% mutate(Demographic = "Age Group")
-overall_proportion_diagnosed_HCV_gender <- proportion_diagnosed_HCV(attendees_HCV_all_1, "Gender") %>% mutate(Demographic = "Gender")
-overall_proportion_diagnosed_HCV_ethnic <- proportion_diagnosed_HCV(attendees_HCV_all_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-overall_proportion_diagnosed_HCV_IMD <- proportion_diagnosed_HCV(attendees_HCV_all_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus3 across different demographics for overall distribution
+overall_proportion_diagnosed_V3_age <- proportion_diagnosed_V3(attendees_V3_all_clean, "age_group") %>% mutate(Demographic = "Age Group")
+overall_proportion_diagnosed_V3_gender <- proportion_diagnosed_V3(attendees_V3_all_clean, "Gender") %>% mutate(Demographic = "Gender")
+overall_proportion_diagnosed_V3_ethnic <- proportion_diagnosed_V3(attendees_V3_all_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+overall_proportion_diagnosed_V3_IMD <- proportion_diagnosed_V3(attendees_V3_all_clean, "IMD") %>% mutate(Demographic = "IMD")
 
 # Combine the individual data frames into a list
-overall_proportion_diagnosed_list_HCV <- list(
-  overall_proportion_diagnosed_HCV_age,
-  overall_proportion_diagnosed_HCV_gender,
-  overall_proportion_diagnosed_HCV_ethnic,
-  overall_proportion_diagnosed_HCV_IMD
+overall_proportion_diagnosed_list_V3 <- list(
+  overall_proportion_diagnosed_V3_age,
+  overall_proportion_diagnosed_V3_gender,
+  overall_proportion_diagnosed_V3_ethnic,
+  overall_proportion_diagnosed_V3_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(overall_proportion_diagnosed_list_HCV) == 0 || all_empty(overall_proportion_diagnosed_list_HCV)) {
-  overall_combined_Proportion_diagnosed_long_HCV <- data.frame()
+if (length(overall_proportion_diagnosed_list_V3) == 0 || all_empty(overall_proportion_diagnosed_list_V3)) {
+  overall_combined_Proportion_diagnosed_long_V3 <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  overall_combined_Proportion_diagnosed_long_HCV <- bind_rows(overall_proportion_diagnosed_list_HCV) %>%
+  overall_combined_Proportion_diagnosed_long_V3 <- bind_rows(overall_proportion_diagnosed_list_V3) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
 # Check if the required column exists and the data frame is not empty
-if ("rna_positive_new" %in% colnames(attendees_HCV_all_1) && nrow(attendees_HCV_all_1) > 0) {
+if ("new_positive_flag" %in% colnames(attendees_V3_all_clean) && nrow(attendees_V3_all_clean) > 0) {
   
-  # Filter for newly diagnosed HCV cases
-  overall_attendees_HCV_new_diag <- attendees_HCV_all_1 %>% filter(rna_positive_new == "New")
+  # Filter for newly diagnosed Virus3 cases
+  overall_attendees_V3_new_diag <- attendees_V3_all_clean %>% filter(new_positive_flag == "New")
   
-  if (nrow(overall_attendees_HCV_new_diag) > 0) {
-    # Count newly diagnosed HCV cases if any cases exist
-    overall_attendees_HCV_new_diag_long <- count_new_diag(overall_attendees_HCV_new_diag)
+  if (nrow(overall_attendees_V3_new_diag) > 0) {
+    # Count newly diagnosed Virus3 cases if any cases exist
+    overall_attendees_V3_new_diag_long <- count_new_diag(overall_attendees_V3_new_diag)
   } else {
     # If no newly diagnosed cases, return an empty data frame
-    overall_attendees_HCV_new_diag_long <- data.frame()
+    overall_attendees_V3_new_diag_long <- data.frame()
   }
   
 } else {
   # If the column doesn't exist or the data frame is empty, return an empty data frame
-  overall_attendees_HCV_new_diag_long <- data.frame()
+  overall_attendees_V3_new_diag_long <- data.frame()
 }
 
 ```
@@ -422,47 +306,47 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HBV across different demographics for overall distribution
-overall_proportion_diagnosed_HBV_age <- proportion_diagnosed_HBV(attendees_HBV_all_1, "age_group") %>% mutate(Demographic = "Age Group")
-overall_proportion_diagnosed_HBV_gender <- proportion_diagnosed_HBV(attendees_HBV_all_1, "Gender") %>% mutate(Demographic = "Gender")
-overall_proportion_diagnosed_HBV_ethnic <- proportion_diagnosed_HBV(attendees_HBV_all_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-overall_proportion_diagnosed_HBV_IMD <- proportion_diagnosed_HBV(attendees_HBV_all_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus2 across different demographics for overall distribution
+overall_proportion_diagnosed_V2_age <- proportion_diagnosed_V2(attendees_V2_all_clean, "age_group") %>% mutate(Demographic = "Age Group")
+overall_proportion_diagnosed_V2_gender <- proportion_diagnosed_V2(attendees_V2_all_clean, "Gender") %>% mutate(Demographic = "Gender")
+overall_proportion_diagnosed_V2_ethnic <- proportion_diagnosed_V2(attendees_V2_all_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+overall_proportion_diagnosed_V2_IMD <- proportion_diagnosed_V2(attendees_V2_all_clean, "IMD") %>% mutate(Demographic = "IMD")
 
 # Combine the individual data frames into a list
-overall_proportion_diagnosed_list_HBV <- list(
-  overall_proportion_diagnosed_HBV_age,
-  overall_proportion_diagnosed_HBV_gender,
-  overall_proportion_diagnosed_HBV_ethnic,
-  overall_proportion_diagnosed_HBV_IMD
+overall_proportion_diagnosed_list_V2 <- list(
+  overall_proportion_diagnosed_V2_age,
+  overall_proportion_diagnosed_V2_gender,
+  overall_proportion_diagnosed_V2_ethnic,
+  overall_proportion_diagnosed_V2_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(overall_proportion_diagnosed_list_HBV) == 0 || all_empty(overall_proportion_diagnosed_list_HBV)) {
-  overall_combined_Proportion_diagnosed_long_HBV <- data.frame()
+if (length(overall_proportion_diagnosed_list_V2) == 0 || all_empty(overall_proportion_diagnosed_list_V2)) {
+  overall_combined_Proportion_diagnosed_long_V2 <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  overall_combined_Proportion_diagnosed_long_HBV <- bind_rows(overall_proportion_diagnosed_list_HBV) %>%
+  overall_combined_Proportion_diagnosed_long_V2 <- bind_rows(overall_proportion_diagnosed_list_V2) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
-# Check if the required column exists and is not empty
-if ("HBsAg_positive_new" %in% colnames(attendees_HBV_all_1) && nrow(attendees_HBV_all_1) > 0) {
+# Check if the required column exists and the data frame is not empty
+if ("new_positive_flag" %in% colnames(attendees_V2_all_clean) && nrow(attendees_V2_all_clean) > 0) {
   
-  # Filter for newly diagnosed HBV cases
-  overall_attendees_HBV_new_diag <- attendees_HBV_all_1 %>% filter(HBsAg_positive_new == "New")
+  # Filter for newly diagnosed Virus2 cases
+  overall_attendees_V2_new_diag <- attendees_V2_all_clean %>% filter(new_positive_flag == "New")
   
-  if (nrow(overall_attendees_HBV_new_diag) > 0) {
-    # Count newly diagnosed HBV cases if any cases exist
-    overall_attendees_HBV_new_diag_long <- count_new_diag(overall_attendees_HBV_new_diag)
+  if (nrow(overall_attendees_V2_new_diag) > 0) {
+    # Count newly diagnosed Virus2 cases if any cases exist
+    overall_attendees_V2_new_diag_long <- count_new_diag(overall_attendees_V2_new_diag)
   } else {
     # If no newly diagnosed cases, return an empty data frame
-    overall_attendees_HBV_new_diag_long <- data.frame()
+    overall_attendees_V2_new_diag_long <- data.frame()
   }
   
 } else {
   # If the column doesn't exist or the data frame is empty, return an empty data frame
-  overall_attendees_HBV_new_diag_long <- data.frame()
+  overall_attendees_V2_new_diag_long <- data.frame()
 }
 
 ```
@@ -470,70 +354,72 @@ if ("HBsAg_positive_new" %in% colnames(attendees_HBV_all_1) && nrow(attendees_HB
 
 
 ```{r attendees-with-blood-test}
-# Analyse attendees with a blood test
-attendees_with_blood_HIV <- attendees_HIV_1 %>% filter(ECDS_bloods_any == "Yes")
-attendees_with_blood_HCV <- attendees_HCV_1 %>% filter(ECDS_bloods_any == "Yes")
-attendees_with_blood_HBV <- attendees_HBV_1 %>% filter(ECDS_bloods_any == "Yes")
+# Analyze attendees with a blood test using generic variable names
+attendees_with_blood_V1 <- attendees_V1_clean %>% filter(blood_test_flag == "Yes")
+attendees_with_blood_V3 <- attendees_V3_clean %>% filter(blood_test_flag == "Yes")
+attendees_with_blood_V2 <- attendees_V2_clean %>% filter(blood_test_flag == "Yes")
 
 ```
 
 
 ```{r blood-test-prop}
-# Calculate proportions of attendees tested for HIV across different demographics 
-proportion_tested_by_age_HIV <- calculate_proportion_tested(attendees_HIV_1, "age_group")
-proportion_tested_by_gender_HIV <- calculate_proportion_tested(attendees_HIV_1, "Gender")
-proportion_tested_by_ethnic_group_HIV <- calculate_proportion_tested(attendees_HIV_1, "ethnic_group")
-proportion_tested_by_IMD_HIV <- calculate_proportion_tested(attendees_HIV_1, "IMD")
+# Calculate proportions of attendees tested for Virus1 across different demographics 
+proportion_tested_by_age_V1 <- calculate_proportion_tested(attendees_V1_clean, "age_group")
+proportion_tested_by_gender_V1 <- calculate_proportion_tested(attendees_V1_clean, "Gender")
+proportion_tested_by_ethnic_group_V1 <- calculate_proportion_tested(attendees_V1_clean, "ethnic_group")
+proportion_tested_by_IMD_V1 <- calculate_proportion_tested(attendees_V1_clean, "IMD")
 
-# Combine the calculated proportions for attendees tested for HIV
-proportions_tested_HIV_1 <- bind_rows(
-  mutate(proportion_tested_by_age_HIV, Demographic = "Age Group"),
-  mutate(proportion_tested_by_gender_HIV, Demographic = "Gender"),
-  mutate(proportion_tested_by_ethnic_group_HIV, Demographic = "Ethnic Group"),
-  mutate(proportion_tested_by_IMD_HIV, Demographic = "IMD")
+# Combine the calculated proportions for attendees tested for Virus1
+proportions_tested_V1 <- bind_rows(
+  mutate(proportion_tested_by_age_V1, Demographic = "Age Group"),
+  mutate(proportion_tested_by_gender_V1, Demographic = "Gender"),
+  mutate(proportion_tested_by_ethnic_group_V1, Demographic = "Ethnic Group"),
+  mutate(proportion_tested_by_IMD_V1, Demographic = "IMD")
 )
 ```
 
 
 ```{r HIV-test}
 # Proportion of Attendees tested 
-proportion_tested_by_age_HIV <- calculate_proportion_tested(attendees_HIV_1, "age_group")
-proportion_tested_by_gender_HIV <- calculate_proportion_tested(attendees_HIV_1, "Gender")
-proportion_tested_by_ethnic_group_HIV <- calculate_proportion_tested(attendees_HIV_1, "ethnic_group")
-proportion_tested_by_IMD_HIV <- calculate_proportion_tested(attendees_HIV_1, "IMD")
+proportion_tested_by_age_V1 <- calculate_proportion_tested(attendees_V1_clean, "age_group")
+proportion_tested_by_gender_V1 <- calculate_proportion_tested(attendees_V1_clean, "Gender")
+proportion_tested_by_ethnic_group_V1 <- calculate_proportion_tested(attendees_V1_clean, "ethnic_group")
+proportion_tested_by_IMD_V1 <- calculate_proportion_tested(attendees_V1_clean, "IMD")
 
 # Binding rows of all demographics
-proportions_tested_HIV_1 <- bind_rows(
-  mutate(proportion_tested_by_age_HIV, Demographic = "Age Group"),
-  mutate(proportion_tested_by_gender_HIV, Demographic = "Gender"),
-  mutate(proportion_tested_by_ethnic_group_HIV, Demographic = "Ethnic Group"),
-  mutate(proportion_tested_by_IMD_HIV, Demographic = "IMD")
+proportions_tested_V1 <- bind_rows(
+  mutate(proportion_tested_by_age_V1, Demographic = "Age Group"),
+  mutate(proportion_tested_by_gender_V1, Demographic = "Gender"),
+  mutate(proportion_tested_by_ethnic_group_V1, Demographic = "Ethnic Group"),
+  mutate(proportion_tested_by_IMD_V1, Demographic = "IMD")
 )
 
-
-# Calculate demographic breakdowns for eligible attendees tested for HIV
-eligible_demo_by_age_HIV <- calculate_eligible_tested(attendees_HIV_1, age_group, "HIV")
-eligible_demo_by_gender_HIV <- calculate_eligible_tested(attendees_HIV_1, Gender, "HIV")
-eligible_demo_by_ethnic_group_HIV <- calculate_eligible_tested(attendees_HIV_1, ethnic_group, "HIV")
-eligible_demo_by_IMD_HIV <- calculate_eligible_tested(attendees_HIV_1, IMD, "HIV")
+# Calculate demographic breakdowns for eligible attendees tested for Virus1
+eligible_demo_by_age_V1 <- calculate_eligible_tested(attendees_V1_clean, age_group, "Virus1")
+eligible_demo_by_gender_V1 <- calculate_eligible_tested(attendees_V1_clean, Gender, "Virus1")
+eligible_demo_by_ethnic_group_V1 <- calculate_eligible_tested(attendees_V1_clean, ethnic_group, "Virus1")
+eligible_demo_by_IMD_V1 <- calculate_eligible_tested(attendees_V1_clean, IMD, "Virus1")
 
 # Combine all demographic breakdowns
-combined_eligible_demographics_HIV <- bind_rows(
-  mutate(eligible_demo_by_age_HIV, Demographic = "Age Group"),
-  mutate(eligible_demo_by_gender_HIV, Demographic = "Gender"),
-  mutate(eligible_demo_by_ethnic_group_HIV, Demographic = "Ethnic Group"),
-  mutate(eligible_demo_by_IMD_HIV, Demographic = "IMD")
+combined_eligible_demographics_V1 <- bind_rows(
+  mutate(eligible_demo_by_age_V1, Demographic = "Age Group"),
+  mutate(eligible_demo_by_gender_V1, Demographic = "Gender"),
+  mutate(eligible_demo_by_ethnic_group_V1, Demographic = "Ethnic Group"),
+  mutate(eligible_demo_by_IMD_V1, Demographic = "IMD")
 )
 
-# Calculate proportions of eligible attendees tested for HIV across different demographics
-proportions_HIV_tested_eligible_age <- proportion_tested_eligible(attendees_HIV_1, HIV, age_group)
-proportions_HIV_tested_eligible_Gender <- proportion_tested_eligible(attendees_HIV_1, HIV, Gender)
-proportions_HIV_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_HIV_1, HIV, ethnic_group)
-proportions_HIV_tested_eligible_IMD <- proportion_tested_eligible(attendees_HIV_1, HIV, IMD)
+# Calculate proportions of eligible attendees tested for Virus1 across different demographics
+proportions_V1_tested_eligible_age <- proportion_tested_eligible(attendees_V1_clean, Virus1, age_group)
+proportions_V1_tested_eligible_Gender <- proportion_tested_eligible(attendees_V1_clean, Virus1, Gender)
+proportions_V1_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_V1_clean, Virus1, ethnic_group)
+proportions_V1_tested_eligible_IMD <- proportion_tested_eligible(attendees_V1_clean, Virus1, IMD)
 
-# Combine the calculated proportions for eligible attendees tested for HIV
-combined_proportions_eligible_tested_HIV <- combine_and_prepare_eligible(
-  list(proportions_HIV_tested_eligible_Gender, proportions_HIV_tested_eligible_age, proportions_HIV_tested_eligible_Ethnic_group, proportions_HIV_tested_eligible_IMD),
+# Combine the calculated proportions for eligible attendees tested for Virus1
+combined_proportions_eligible_tested_V1 <- combine_and_prepare_eligible(
+  list(proportions_V1_tested_eligible_Gender,
+       proportions_V1_tested_eligible_age,
+       proportions_V1_tested_eligible_Ethnic_group,
+       proportions_V1_tested_eligible_IMD),
   c("Gender", "Age Group", "Ethnic Group", "IMD")
 )
 
@@ -541,93 +427,98 @@ combined_proportions_eligible_tested_HIV <- combine_and_prepare_eligible(
 
 
 ``` {r HCV-test}
-# Analyse characteristics of attendees for HCV
-attendees_characteristics_HCV <- attendees_characteristics(attendees_HCV_1)
+# Analyze characteristics of attendees for Virus3
+attendees_characteristics_V3 <- attendees_characteristics(attendees_V3_clean)
 
-# Calculate proportions of attendees tested for HCV across different demographics
-proportion_tested_by_age_HCV <- calculate_proportion_tested(attendees_HCV_1, "age_group")
-proportion_tested_by_gender_HCV <- calculate_proportion_tested(attendees_HCV_1, "Gender")
-proportion_tested_by_ethnic_group_HCV <- calculate_proportion_tested(attendees_HCV_1, "ethnic_group")
-proportion_tested_by_IMD_HCV <- calculate_proportion_tested(attendees_HCV_1, "IMD")
+# Calculate proportions of attendees tested for Virus3 across different demographics
+proportion_tested_by_age_V3 <- calculate_proportion_tested(attendees_V3_clean, "age_group")
+proportion_tested_by_gender_V3 <- calculate_proportion_tested(attendees_V3_clean, "Gender")
+proportion_tested_by_ethnic_group_V3 <- calculate_proportion_tested(attendees_V3_clean, "ethnic_group")
+proportion_tested_by_IMD_V3 <- calculate_proportion_tested(attendees_V3_clean, "IMD")
 
-# Combine the calculated proportions for attendees tested for HCV
-proportions_tested_HCV_1 <- bind_rows(
-  mutate(proportion_tested_by_age_HCV, Demographic = "Age Group"),
-  mutate(proportion_tested_by_gender_HCV, Demographic = "Gender"),
-  mutate(proportion_tested_by_ethnic_group_HCV, Demographic = "Ethnic Group"),
-  mutate(proportion_tested_by_IMD_HCV, Demographic = "IMD")
+# Combine the calculated proportions for attendees tested for Virus3
+proportions_tested_V3 <- bind_rows(
+  mutate(proportion_tested_by_age_V3, Demographic = "Age Group"),
+  mutate(proportion_tested_by_gender_V3, Demographic = "Gender"),
+  mutate(proportion_tested_by_ethnic_group_V3, Demographic = "Ethnic Group"),
+  mutate(proportion_tested_by_IMD_V3, Demographic = "IMD")
 )
 
-# Calculate demographic breakdowns for eligible attendees tested for HCV
-eligible_demo_by_age_HCV <- calculate_eligible_tested(attendees_HCV_1, age_group, "HCV")
-eligible_demo_by_gender_HCV <- calculate_eligible_tested(attendees_HCV_1, Gender, "HCV")
-eligible_demo_by_ethnic_group_HCV <- calculate_eligible_tested(attendees_HCV_1, ethnic_group, "HCV")
-eligible_demo_by_IMD_HCV <- calculate_eligible_tested(attendees_HCV_1, IMD, "HCV")
+# Calculate demographic breakdowns for eligible attendees tested for Virus3
+eligible_demo_by_age_V3 <- calculate_eligible_tested(attendees_V3_clean, age_group, "Virus3")
+eligible_demo_by_gender_V3 <- calculate_eligible_tested(attendees_V3_clean, Gender, "Virus3")
+eligible_demo_by_ethnic_group_V3 <- calculate_eligible_tested(attendees_V3_clean, ethnic_group, "Virus3")
+eligible_demo_by_IMD_V3 <- calculate_eligible_tested(attendees_V3_clean, IMD, "Virus3")
 
 # Combine all demographic breakdowns
-combined_eligible_demographics_HCV <- bind_rows(
-  mutate(eligible_demo_by_age_HCV, Demographic = "Age Group"),
-  mutate(eligible_demo_by_gender_HCV, Demographic = "Gender"),
-  mutate(eligible_demo_by_ethnic_group_HCV, Demographic = "Ethnic Group"),
-  mutate(eligible_demo_by_IMD_HCV, Demographic = "IMD")
+combined_eligible_demographics_V3 <- bind_rows(
+  mutate(eligible_demo_by_age_V3, Demographic = "Age Group"),
+  mutate(eligible_demo_by_gender_V3, Demographic = "Gender"),
+  mutate(eligible_demo_by_ethnic_group_V3, Demographic = "Ethnic Group"),
+  mutate(eligible_demo_by_IMD_V3, Demographic = "IMD")
 )
 
-# Calculate proportions of eligible attendees tested for HCV
-proportions_HCV_tested_eligible_age <- proportion_tested_eligible(attendees_HCV_1, HCV, age_group)
-proportions_HCV_tested_eligible_Gender <- proportion_tested_eligible(attendees_HCV_1, HCV, Gender)
-proportions_HCV_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_HCV_1, HCV, ethnic_group)
-proportions_HCV_tested_eligible_IMD <- proportion_tested_eligible(attendees_HCV_1, HCV, IMD)
+# Calculate proportions of eligible attendees tested for Virus3
+proportions_V3_tested_eligible_age <- proportion_tested_eligible(attendees_V3_clean, Virus3, age_group)
+proportions_V3_tested_eligible_Gender <- proportion_tested_eligible(attendees_V3_clean, Virus3, Gender)
+proportions_V3_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_V3_clean, Virus3, ethnic_group)
+proportions_V3_tested_eligible_IMD <- proportion_tested_eligible(attendees_V3_clean, Virus3, IMD)
 
-# Combine the calculated proportions for eligible attendees tested for HCV
-combined_proportions_eligible_tested_HCV <- combine_and_prepare_eligible(
-  list(proportions_HCV_tested_eligible_Gender, proportions_HCV_tested_eligible_age, proportions_HCV_tested_eligible_Ethnic_group, proportions_HCV_tested_eligible_IMD),
+# Combine the calculated proportions for eligible attendees tested for Virus3
+combined_proportions_eligible_tested_V3 <- combine_and_prepare_eligible(
+  list(proportions_V3_tested_eligible_Gender, 
+       proportions_V3_tested_eligible_age, 
+       proportions_V3_tested_eligible_Ethnic_group, 
+       proportions_V3_tested_eligible_IMD),
   c("Gender", "Age Group", "Ethnic Group", "IMD")
 )
 ```
 
 
 ``` {r HBV-test}
-# Analyse characteristics of attendees for HBV
-attendees_characteristics_HBV <- attendees_characteristics(attendees_HBV_1)
+# Analyze characteristics of attendees for Virus2
+attendees_characteristics_V2 <- attendees_characteristics(attendees_V2_clean)
 
-# Calculate proportions of attendees tested for HBV across different demographics
-proportion_tested_by_age_HBV <- calculate_proportion_tested(attendees_HBV_1, "age_group")
-proportion_tested_by_gender_HBV <- calculate_proportion_tested(attendees_HBV_1, "Gender")
-proportion_tested_by_ethnic_group_HBV <- calculate_proportion_tested(attendees_HBV_1, "ethnic_group")
-proportion_tested_by_IMD_HBV <- calculate_proportion_tested(attendees_HBV_1, "IMD")
+# Calculate proportions of attendees tested for Virus2 across different demographics
+proportion_tested_by_age_V2 <- calculate_proportion_tested(attendees_V2_clean, "age_group")
+proportion_tested_by_gender_V2 <- calculate_proportion_tested(attendees_V2_clean, "Gender")
+proportion_tested_by_ethnic_group_V2 <- calculate_proportion_tested(attendees_V2_clean, "ethnic_group")
+proportion_tested_by_IMD_V2 <- calculate_proportion_tested(attendees_V2_clean, "IMD")
 
-# Combine the calculated proportions for attendees tested for HBV
-proportions_tested_HBV_1 <- bind_rows(
-  mutate(proportion_tested_by_age_HBV, Demographic = "Age Group"),
-  mutate(proportion_tested_by_gender_HBV, Demographic = "Gender"),
-  mutate(proportion_tested_by_ethnic_group_HBV, Demographic = "Ethnic Group"),
-  mutate(proportion_tested_by_IMD_HBV, Demographic = "IMD")
+# Combine the calculated proportions for attendees tested for Virus2
+proportions_tested_V2 <- bind_rows(
+  mutate(proportion_tested_by_age_V2, Demographic = "Age Group"),
+  mutate(proportion_tested_by_gender_V2, Demographic = "Gender"),
+  mutate(proportion_tested_by_ethnic_group_V2, Demographic = "Ethnic Group"),
+  mutate(proportion_tested_by_IMD_V2, Demographic = "IMD")
 )
 
-# Calculate demographic breakdowns for eligible attendees tested for HBV
-eligible_demo_by_age_HBV <- calculate_eligible_tested(attendees_HBV_1, age_group, "HBV")
-eligible_demo_by_gender_HBV <- calculate_eligible_tested(attendees_HBV_1, Gender, "HBV")
-eligible_demo_by_ethnic_group_HBV <- calculate_eligible_tested(attendees_HBV_1, ethnic_group, "HBV")
-eligible_demo_by_IMD_HBV <- calculate_eligible_tested(attendees_HBV_1, IMD, "HBV")
+# Calculate demographic breakdowns for eligible attendees tested for Virus2
+eligible_demo_by_age_V2 <- calculate_eligible_tested(attendees_V2_clean, age_group, "Virus2")
+eligible_demo_by_gender_V2 <- calculate_eligible_tested(attendees_V2_clean, Gender, "Virus2")
+eligible_demo_by_ethnic_group_V2 <- calculate_eligible_tested(attendees_V2_clean, ethnic_group, "Virus2")
+eligible_demo_by_IMD_V2 <- calculate_eligible_tested(attendees_V2_clean, IMD, "Virus2")
 
-# Combine all demographic breakdowns
-combined_eligible_demographics_HBV <- bind_rows(
-  mutate(eligible_demo_by_age_HBV, Demographic = "Age Group"),
-  mutate(eligible_demo_by_gender_HBV, Demographic = "Gender"),
-  mutate(eligible_demo_by_ethnic_group_HBV, Demographic = "Ethnic Group"),
-  mutate(eligible_demo_by_IMD_HBV, Demographic = "IMD")
+# Combine all demographic breakdowns for eligible attendees
+combined_eligible_demographics_V2 <- bind_rows(
+  mutate(eligible_demo_by_age_V2, Demographic = "Age Group"),
+  mutate(eligible_demo_by_gender_V2, Demographic = "Gender"),
+  mutate(eligible_demo_by_ethnic_group_V2, Demographic = "Ethnic Group"),
+  mutate(eligible_demo_by_IMD_V2, Demographic = "IMD")
 )
 
+# Calculate proportions of eligible attendees tested for Virus2 across different demographics
+proportions_V2_tested_eligible_age <- proportion_tested_eligible(attendees_V2_clean, Virus2, age_group)
+proportions_V2_tested_eligible_Gender <- proportion_tested_eligible(attendees_V2_clean, Virus2, Gender)
+proportions_V2_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_V2_clean, Virus2, ethnic_group)
+proportions_V2_tested_eligible_IMD <- proportion_tested_eligible(attendees_V2_clean, Virus2, IMD)
 
-# Calculate proportions of eligible attendees tested for HBV
-proportions_HBV_tested_eligible_age <- proportion_tested_eligible(attendees_HBV_1, HBV, age_group)
-proportions_HBV_tested_eligible_Gender <- proportion_tested_eligible(attendees_HBV_1, HBV, Gender)
-proportions_HBV_tested_eligible_Ethnic_group <- proportion_tested_eligible(attendees_HBV_1, HBV, ethnic_group)
-proportions_HBV_tested_eligible_IMD <- proportion_tested_eligible(attendees_HBV_1, HBV, IMD)
-
-# Combine the calculated proportions for eligible attendees tested for HBV
-combined_proportions_eligible_tested_HBV <- combine_and_prepare_eligible(
-  list(proportions_HBV_tested_eligible_Gender, proportions_HBV_tested_eligible_age, proportions_HBV_tested_eligible_Ethnic_group, proportions_HBV_tested_eligible_IMD),
+# Combine the calculated proportions for eligible attendees tested for Virus2
+combined_proportions_eligible_tested_V2 <- combine_and_prepare_eligible(
+  list(proportions_V2_tested_eligible_Gender,
+       proportions_V2_tested_eligible_age,
+       proportions_V2_tested_eligible_Ethnic_group,
+       proportions_V2_tested_eligible_IMD),
   c("Gender", "Age Group", "Ethnic Group", "IMD")
 )
 ```
@@ -640,60 +531,66 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HIV across different demographics
-proportion_diagnosed_HIV_age <- proportion_diagnosed_HIV(attendees_HIV_1, "age_group") %>% mutate(Demographic = "Age Group")
-proportion_diagnosed_HIV_gender <- proportion_diagnosed_HIV(attendees_HIV_1, "Gender") %>% mutate(Demographic = "Gender")
-proportion_diagnosed_HIV_ethnic <- proportion_diagnosed_HIV(attendees_HIV_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-proportion_diagnosed_HIV_IMD <- proportion_diagnosed_HIV(attendees_HIV_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus1 across different demographics
+proportion_diagnosed_V1_age <- proportion_diagnosed_V1(attendees_V1_clean, "age_group") %>% mutate(Demographic = "Age Group")
+proportion_diagnosed_V1_gender <- proportion_diagnosed_V1(attendees_V1_clean, "Gender") %>% mutate(Demographic = "Gender")
+proportion_diagnosed_V1_ethnic <- proportion_diagnosed_V1(attendees_V1_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+proportion_diagnosed_V1_IMD <- proportion_diagnosed_V1(attendees_V1_clean, "IMD") %>% mutate(Demographic = "IMD")
 
 # Combine the individual data frames into a list
-proportion_diagnosed_list_HIV <- list(
-  proportion_diagnosed_HIV_age,
-  proportion_diagnosed_HIV_gender,
-  proportion_diagnosed_HIV_ethnic,
-  proportion_diagnosed_HIV_IMD
+proportion_diagnosed_list_V1 <- list(
+  proportion_diagnosed_V1_age,
+  proportion_diagnosed_V1_gender,
+  proportion_diagnosed_V1_ethnic,
+  proportion_diagnosed_V1_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(proportion_diagnosed_list_HIV) == 0 || all_empty(proportion_diagnosed_list_HIV)) {
-  combined_Proportion_diagnosed_long_HIV <- data.frame()
+if (length(proportion_diagnosed_list_V1) == 0 || all_empty(proportion_diagnosed_list_V1)) {
+  combined_Proportion_diagnosed_long_V1 <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  combined_Proportion_diagnosed_long_HIV <- bind_rows(proportion_diagnosed_list_HIV) %>%
+  combined_Proportion_diagnosed_long_V1 <- bind_rows(proportion_diagnosed_list_V1) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
-# Check if the required columns exist and the data frame is not empty
-if ("new_diagnosis" %in% colnames(attendees_HIV_1) && nrow(attendees_HIV_1) > 0) {
+# Check if the required column exists and the data frame is not empty for new diagnoses
+if ("new_positive_flag" %in% colnames(attendees_V1_clean) && nrow(attendees_V1_clean) > 0) {
   
-  # Filter for newly diagnosed HIV cases
-  attendees_HIV_new_diag <- attendees_HIV_1 %>% filter(new_diagnosis == "TRUE")
+  # Filter for newly diagnosed Virus1 cases
+  attendees_V1_new_diag <- attendees_V1_clean %>% filter(new_positive_flag == "TRUE")
   
-  if (nrow(attendees_HIV_new_diag) > 0) {
-    # Count newly diagnosed HIV cases if any cases exist
-    attendees_HIV_new_diag_long <- count_new_diag(attendees_HIV_new_diag)
+  if (nrow(attendees_V1_new_diag) > 0) {
+    # Count newly diagnosed Virus1 cases if any cases exist
+    attendees_V1_new_diag_long <- count_new_diag(attendees_V1_new_diag)
   } else {
     # If no newly diagnosed cases, return an empty data frame
-    attendees_HIV_new_diag_long <- data.frame()
+    attendees_V1_new_diag_long <- data.frame()
   }
   
+} else {
+  # If the column doesn't exist or the data frame is empty, return an empty data frame
+  attendees_V1_new_diag_long <- data.frame()
 }
 
 # Check if the required column exists for previously diagnosed cases
-if ("not_retained" %in% colnames(attendees_HIV_1) && nrow(attendees_HIV_1) > 0) {
+if ("not_in_care_flag" %in% colnames(attendees_V1_clean) && nrow(attendees_V1_clean) > 0) {
   
-  # Filter for previously diagnosed HIV cases
-  attendees_HIV_prev_diag <- attendees_HIV_1 %>% filter(not_retained == "TRUE")
+  # Filter for previously diagnosed Virus1 cases (not in care)
+  attendees_V1_prev_diag <- attendees_V1_clean %>% filter(not_in_care_flag == "TRUE")
   
-  if (nrow(attendees_HIV_prev_diag) > 0) {
-    # Count previously diagnosed HIV cases if any cases exist
-    attendees_HIV_prev_diag_long <- count_new_diag(attendees_HIV_prev_diag)
+  if (nrow(attendees_V1_prev_diag) > 0) {
+    # Count previously diagnosed Virus1 cases if any cases exist
+    attendees_V1_prev_diag_long <- count_new_diag(attendees_V1_prev_diag)
   } else {
     # If no previously diagnosed cases, return an empty data frame
-    attendees_HIV_prev_diag_long <- data.frame()
+    attendees_V1_prev_diag_long <- data.frame()
   }
   
+} else {
+  # If the column doesn't exist or the data frame is empty, return an empty data frame
+  attendees_V1_prev_diag_long <- data.frame()
 }
 
 ```
@@ -705,47 +602,47 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HCV across different demographics for HCVAb == "Positive"
-proportion_diagnosed_HCVAb_age <- proportion_positive_HCV(attendees_HCV_1, "age_group") %>% mutate(Demographic = "Age Group")
-proportion_diagnosed_HCVAb_gender <- proportion_positive_HCV(attendees_HCV_1, "Gender") %>% mutate(Demographic = "Gender")
-proportion_diagnosed_HCVAb_ethnic <- proportion_positive_HCV(attendees_HCV_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-proportion_diagnosed_HCVAb_IMD <- proportion_positive_HCV(attendees_HCV_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus3 (antibody positive) across different demographics
+proportion_diagnosed_V3Ab_age <- proportion_positive_V3(attendees_V3_clean, "age_group") %>% mutate(Demographic = "Age Group")
+proportion_diagnosed_V3Ab_gender <- proportion_positive_V3(attendees_V3_clean, "Gender") %>% mutate(Demographic = "Gender")
+proportion_diagnosed_V3Ab_ethnic <- proportion_positive_V3(attendees_V3_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+proportion_diagnosed_V3Ab_IMD <- proportion_positive_V3(attendees_V3_clean, "IMD") %>% mutate(Demographic = "IMD")
 
-# Combine the individual data frames into a list for HCVAb == "Positive"
-proportion_diagnosed_list_HCVAb <- list(
-  proportion_diagnosed_HCVAb_age,
-  proportion_diagnosed_HCVAb_gender,
-  proportion_diagnosed_HCVAb_ethnic,
-  proportion_diagnosed_HCVAb_IMD
+# Combine the individual data frames into a list for antibody-positive diagnoses
+proportion_diagnosed_list_V3Ab <- list(
+  proportion_diagnosed_V3Ab_age,
+  proportion_diagnosed_V3Ab_gender,
+  proportion_diagnosed_V3Ab_ethnic,
+  proportion_diagnosed_V3Ab_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(proportion_diagnosed_list_HCVAb) == 0 || all_empty(proportion_diagnosed_list_HCVAb)) {
-  combined_Proportion_diagnosed_long_HCVAb <- data.frame()
+if (length(proportion_diagnosed_list_V3Ab) == 0 || all_empty(proportion_diagnosed_list_V3Ab)) {
+  combined_Proportion_diagnosed_long_V3Ab <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  combined_Proportion_diagnosed_long_HCVAb <- bind_rows(proportion_diagnosed_list_HCVAb) %>%
+  combined_Proportion_diagnosed_long_V3Ab <- bind_rows(proportion_diagnosed_list_V3Ab) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
 # Check if the required column exists and the data frame is not empty
-if ("HCVAb" %in% colnames(attendees_HCV_1) && nrow(attendees_HCV_1) > 0) {
+if ("antibody_positive_flag" %in% colnames(attendees_V3_clean) && nrow(attendees_V3_clean) > 0) {
   
-  # Filter for diagnosed HCV cases where HCVAb == "Positive"
-  attendees_HCV_positive_diag <- attendees_HCV_1 %>% filter(HCVAb == "Positive")
+  # Filter for diagnosed Virus3 cases where antibody_positive_flag == "Positive"
+  attendees_V3_positive_diag <- attendees_V3_clean %>% filter(antibody_positive_flag == "Positive")
   
-  if (nrow(attendees_HCV_positive_diag) > 0) {
-    # Count HCVAb positive diagnoses if any cases exist
-    attendees_HCV_positive_diag_long <- count_new_diag(attendees_HCV_positive_diag)
+  if (nrow(attendees_V3_positive_diag) > 0) {
+    # Count Virus3 antibody-positive diagnoses if any cases exist
+    attendees_V3_positive_diag_long <- count_new_diag(attendees_V3_positive_diag)
   } else {
     # If no positive cases, return an empty data frame
-    attendees_HCV_positive_diag_long <- data.frame()
+    attendees_V3_positive_diag_long <- data.frame()
   }
   
 } else {
   # If the column doesn't exist or the data frame is empty, return an empty data frame
-  attendees_HCV_positive_diag_long <- data.frame()
+  attendees_V3_positive_diag_long <- data.frame()
 }
 
 ```
@@ -757,47 +654,47 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HCV across different demographics
-proportion_diagnosed_HCV_age <- proportion_diagnosed_HCV(attendees_HCV_1, "age_group") %>% mutate(Demographic = "Age Group")
-proportion_diagnosed_HCV_gender <- proportion_diagnosed_HCV(attendees_HCV_1, "Gender") %>% mutate(Demographic = "Gender")
-proportion_diagnosed_HCV_ethnic <- proportion_diagnosed_HCV(attendees_HCV_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-proportion_diagnosed_HCV_IMD <- proportion_diagnosed_HCV(attendees_HCV_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus3 across different demographics
+proportion_diagnosed_V3_age <- proportion_diagnosed_V3(attendees_V3_clean, "age_group") %>% mutate(Demographic = "Age Group")
+proportion_diagnosed_V3_gender <- proportion_diagnosed_V3(attendees_V3_clean, "Gender") %>% mutate(Demographic = "Gender")
+proportion_diagnosed_V3_ethnic <- proportion_diagnosed_V3(attendees_V3_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+proportion_diagnosed_V3_IMD <- proportion_diagnosed_V3(attendees_V3_clean, "IMD") %>% mutate(Demographic = "IMD")
 
 # Combine the individual data frames into a list
-proportion_diagnosed_list_HCV <- list(
-  proportion_diagnosed_HCV_age,
-  proportion_diagnosed_HCV_gender,
-  proportion_diagnosed_HCV_ethnic,
-  proportion_diagnosed_HCV_IMD
+proportion_diagnosed_list_V3 <- list(
+  proportion_diagnosed_V3_age,
+  proportion_diagnosed_V3_gender,
+  proportion_diagnosed_V3_ethnic,
+  proportion_diagnosed_V3_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(proportion_diagnosed_list_HCV) == 0 || all_empty(proportion_diagnosed_list_HCV)) {
-  combined_Proportion_diagnosed_long_HCV <- data.frame()
+if (length(proportion_diagnosed_list_V3) == 0 || all_empty(proportion_diagnosed_list_V3)) {
+  combined_Proportion_diagnosed_long_V3 <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  combined_Proportion_diagnosed_long_HCV <- bind_rows(proportion_diagnosed_list_HCV) %>%
+  combined_Proportion_diagnosed_long_V3 <- bind_rows(proportion_diagnosed_list_V3) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
 # Check if the required column exists and the data frame is not empty
-if ("rna_positive_new" %in% colnames(attendees_HCV_1) && nrow(attendees_HCV_1) > 0) {
+if ("new_positive_flag" %in% colnames(attendees_V3_clean) && nrow(attendees_V3_clean) > 0) {
   
-  # Filter for newly diagnosed HCV cases
-  attendees_HCV_new_diag <- attendees_HCV_1 %>% filter(rna_positive_new == "New")
+  # Filter for newly diagnosed Virus3 cases
+  attendees_V3_new_diag <- attendees_V3_clean %>% filter(new_positive_flag == "New")
   
-  if (nrow(attendees_HCV_new_diag) > 0) {
-    # Count newly diagnosed HCV cases if any cases exist
-    attendees_HCV_new_diag_long <- count_new_diag(attendees_HCV_new_diag)
+  if (nrow(attendees_V3_new_diag) > 0) {
+    # Count newly diagnosed Virus3 cases if any cases exist
+    attendees_V3_new_diag_long <- count_new_diag(attendees_V3_new_diag)
   } else {
     # If no newly diagnosed cases, return an empty data frame
-    attendees_HCV_new_diag_long <- data.frame()
+    attendees_V3_new_diag_long <- data.frame()
   }
   
 } else {
   # If the column doesn't exist or the data frame is empty, return an empty data frame
-  attendees_HCV_new_diag_long <- data.frame()
+  attendees_V3_new_diag_long <- data.frame()
 }
 
 ```
@@ -809,47 +706,47 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HBV across different demographics for HBVAg == "Positive"
-proportion_diagnosed_HBVAg_age <- proportion_positive_HBV(attendees_HBV_1, "age_group") %>% mutate(Demographic = "Age Group")
-proportion_diagnosed_HBVAg_gender <- proportion_positive_HBV(attendees_HBV_1, "Gender") %>% mutate(Demographic = "Gender")
-proportion_diagnosed_HBVAg_ethnic <- proportion_positive_HBV(attendees_HBV_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-proportion_diagnosed_HBVAg_IMD <- proportion_positive_HBV(attendees_HBV_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus2 (antigen positive) across different demographics
+proportion_diagnosed_V2Ag_age <- proportion_positive_V2(attendees_V2_clean, "age_group") %>% mutate(Demographic = "Age Group")
+proportion_diagnosed_V2Ag_gender <- proportion_positive_V2(attendees_V2_clean, "Gender") %>% mutate(Demographic = "Gender")
+proportion_diagnosed_V2Ag_ethnic <- proportion_positive_V2(attendees_V2_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+proportion_diagnosed_V2Ag_IMD <- proportion_positive_V2(attendees_V2_clean, "IMD") %>% mutate(Demographic = "IMD")
 
-# Combine the individual data frames into a list for HBVAg == "Positive"
-proportion_diagnosed_list_HBVAg <- list(
-  proportion_diagnosed_HBVAg_age,
-  proportion_diagnosed_HBVAg_gender,
-  proportion_diagnosed_HBVAg_ethnic,
-  proportion_diagnosed_HBVAg_IMD
+# Combine the individual data frames into a list for antigen-positive diagnoses
+proportion_diagnosed_list_V2Ag <- list(
+  proportion_diagnosed_V2Ag_age,
+  proportion_diagnosed_V2Ag_gender,
+  proportion_diagnosed_V2Ag_ethnic,
+  proportion_diagnosed_V2Ag_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(proportion_diagnosed_list_HBVAg) == 0 || all_empty(proportion_diagnosed_list_HBVAg)) {
-  combined_Proportion_diagnosed_long_HBVAg <- data.frame()
+if (length(proportion_diagnosed_list_V2Ag) == 0 || all_empty(proportion_diagnosed_list_V2Ag)) {
+  combined_Proportion_diagnosed_long_V2Ag <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  combined_Proportion_diagnosed_long_HBVAg <- bind_rows(proportion_diagnosed_list_HBVAg) %>%
+  combined_Proportion_diagnosed_long_V2Ag <- bind_rows(proportion_diagnosed_list_V2Ag) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
-# Check if the required column exists and is not empty
-if ("HBVAg" %in% colnames(attendees_HBV_1) && nrow(attendees_HBV_1) > 0) {
+# Check if the required column exists and the data frame is not empty
+if ("antigen_positive_flag" %in% colnames(attendees_V2_clean) && nrow(attendees_V2_clean) > 0) {
   
-  # Filter for HBV diagnosed cases where HBVAg == "Positive"
-  attendees_HBV_positive_diag <- attendees_HBV_1 %>% filter(HBVAg == "Positive")
+  # Filter for Virus2 diagnosed cases where antigen_positive_flag == "Positive"
+  attendees_V2_positive_diag <- attendees_V2_clean %>% filter(antigen_positive_flag == "Positive")
   
-  if (nrow(attendees_HBV_positive_diag) > 0) {
-    # Count HBVAg positive cases if any exist
-    attendees_HBV_positive_diag_long <- count_new_diag(attendees_HBV_positive_diag)
+  if (nrow(attendees_V2_positive_diag) > 0) {
+    # Count antigen positive cases if any exist
+    attendees_V2_positive_diag_long <- count_new_diag(attendees_V2_positive_diag)
   } else {
     # If no positive cases, return an empty data frame
-    attendees_HBV_positive_diag_long <- data.frame()
+    attendees_V2_positive_diag_long <- data.frame()
   }
   
 } else {
   # If the column doesn't exist or the data frame is empty, return an empty data frame
-  attendees_HBV_positive_diag_long <- data.frame()
+  attendees_V2_positive_diag_long <- data.frame()
 }
 
 ```
@@ -861,55 +758,58 @@ all_empty <- function(df_list) {
   all(sapply(df_list, function(df) nrow(df) == 0))
 }
 
-# Calculate proportions diagnosed with HBV across different demographics
-proportion_diagnosed_HBV_age <- proportion_diagnosed_HBV(attendees_HBV_1, "age_group") %>% mutate(Demographic = "Age Group")
-proportion_diagnosed_HBV_gender <- proportion_diagnosed_HBV(attendees_HBV_1, "Gender") %>% mutate(Demographic = "Gender")
-proportion_diagnosed_HBV_ethnic <- proportion_diagnosed_HBV(attendees_HBV_1, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
-proportion_diagnosed_HBV_IMD <- proportion_diagnosed_HBV(attendees_HBV_1, "IMD") %>% mutate(Demographic = "IMD")
+# Calculate proportions diagnosed with Virus2 across different demographics
+proportion_diagnosed_V2_age <- proportion_diagnosed_V2(attendees_V2_clean, "age_group") %>% mutate(Demographic = "Age Group")
+proportion_diagnosed_V2_gender <- proportion_diagnosed_V2(attendees_V2_clean, "Gender") %>% mutate(Demographic = "Gender")
+proportion_diagnosed_V2_ethnic <- proportion_diagnosed_V2(attendees_V2_clean, "ethnic_group") %>% mutate(Demographic = "Ethnic Group")
+proportion_diagnosed_V2_IMD <- proportion_diagnosed_V2(attendees_V2_clean, "IMD") %>% mutate(Demographic = "IMD")
 
 # Combine the individual data frames into a list
-proportion_diagnosed_list <- list(
-  proportion_diagnosed_HBV_age,
-  proportion_diagnosed_HBV_gender,
-  proportion_diagnosed_HBV_ethnic,
-  proportion_diagnosed_HBV_IMD
+proportion_diagnosed_list_V2 <- list(
+  proportion_diagnosed_V2_age,
+  proportion_diagnosed_V2_gender,
+  proportion_diagnosed_V2_ethnic,
+  proportion_diagnosed_V2_IMD
 )
 
 # Check if the list of data frames is empty or if all data frames inside are empty
-if (length(proportion_diagnosed_list) == 0 || all_empty(proportion_diagnosed_list)) {
-  combined_Proportion_diagnosed_long_HBV <- data.frame()
+if (length(proportion_diagnosed_list_V2) == 0 || all_empty(proportion_diagnosed_list_V2)) {
+  combined_Proportion_diagnosed_long_V2 <- data.frame()
 } else {
   # Proceed with combining data frames and further processing
-  combined_Proportion_diagnosed_long_HBV <- bind_rows(proportion_diagnosed_list) %>%
+  combined_Proportion_diagnosed_long_V2 <- bind_rows(proportion_diagnosed_list_V2) %>%
     select(Demographic, Category_Value, Proportion = Proportion_Tested) %>%
     filter(!(Category_Value %in% c("Unknown Gender", "Unknown Ethnicity", "Other", "Unknown IMD")))
 }
 
-# Check if the required column exists and is not empty
-if ("HBsAg_positive_new" %in% colnames(attendees_HBV_1) && nrow(attendees_HBV_1) > 0) {
+# Check if the required column exists and the data frame is not empty
+if ("antigen_positive_flag" %in% colnames(attendees_V2_clean) && nrow(attendees_V2_clean) > 0) {
   
-  # Filter for newly diagnosed HBV cases
-  attendees_HBV_new_diag <- attendees_HBV_1 %>% filter(HBsAg_positive_new == "New")
+  # Filter for newly diagnosed Virus2 cases (antigen positive)
+  attendees_V2_new_diag <- attendees_V2_clean %>% filter(antigen_positive_flag == "New")
   
-  if (nrow(attendees_HBV_new_diag) > 0) {
-    # Count newly diagnosed HBV cases if any cases exist
-    attendees_HBV_new_diag_long <- count_new_diag(attendees_HBV_new_diag)
+  if (nrow(attendees_V2_new_diag) > 0) {
+    # Count newly diagnosed Virus2 cases if any exist
+    attendees_V2_new_diag_long <- count_new_diag(attendees_V2_new_diag)
   } else {
     # If no newly diagnosed cases, return an empty data frame
-    attendees_HBV_new_diag_long <- data.frame()
+    attendees_V2_new_diag_long <- data.frame()
   }
   
 } else {
   # If the column doesn't exist or the data frame is empty, return an empty data frame
-  attendees_HBV_new_diag_long <- data.frame()
+  attendees_V2_new_diag_long <- data.frame()
 }
 
 ```
 
 
 ```{r site-report-summary-html, echo=FALSE, results='asis'}
-# Define Sentinel Site codes
-sentinel_sites <- c('RXL01', 'RYJ02', 'RQM01', 'RJ611', 'RVR50', 'RVR05', 'RAS01', 'RQXM1', 'RJZ01', 'RAX01', 'R0A02', 'R1HNH', 'R0A66', 'RJZ30', 'RJ231', 'E0A3H', 'RJ701', 'RYJ01', 'RJ122', 'R1H12', 'RJ224', 'RQM91', 'R1HKH', 'R0A07')
+# Define generic Sentinel Site codes (adjust these as needed)
+sentinel_sites <- c('SITE01', 'SITE02', 'SITE03', 'SITE04', 'SITE05', 'SITE06', 'SITE07', 
+                    'SITE08', 'SITE09', 'SITE10', 'SITE11', 'SITE12', 'SITE13', 'SITE14', 
+                    'SITE15', 'SITE16', 'SITE17', 'SITE18', 'SITE19', 'SITE20', 'SITE21', 
+                    'SITE22', 'SITE23', 'SITE24')
 
 # Check if the current site is a Sentinel Site
 is_sentinel_site <- params$site_code %in% sentinel_sites
@@ -922,73 +822,73 @@ if (is_sentinel_site) {
     }
     return(0)
   }
-
-  # Generate the data for the table
+  
+  # Generate the data for the table using generic virus names
   summary_table <- tibble::tibble(
-    `Test Type` = c("HIV", "HBV", "HCV"),
+    `Test Type` = c("Virus1", "Virus2", "Virus3"),
     `Total Attendees` = c(
-      get_data_count("attendees_HIV_1"),
-      get_data_count("attendees_HBV_1"),
-      get_data_count("attendees_HCV_1")
+      get_data_count("attendees_V1_clean"),
+      get_data_count("attendees_V2_clean"),
+      get_data_count("attendees_V3_clean")
     ),
     `Total Attendees Across All Sites` = c(
-      totals_dataframe_HIV$Total_Attendees_All_Sites,
-      totals_dataframe_HBV$Total_Attendees_All_Sites,
-      totals_dataframe_HCV$Total_Attendees_All_Sites
+      totals_V1$Total_Attendees_All_Sites,
+      totals_V2$Total_Attendees_All_Sites,
+      totals_V3$Total_Attendees_All_Sites
     ),
     `Attendees with Blood Test` = c(
-      get_data_count("attendees_with_blood_HIV"),
-      get_data_count("attendees_with_blood_HBV"),
-      get_data_count("attendees_with_blood_HCV")
+      get_data_count("attendees_with_blood_V1"),
+      get_data_count("attendees_with_blood_V2"),
+      get_data_count("attendees_with_blood_V3")
     ),
     `Diagnosed Positive` = c(
-      NA, # Diagnosed positive not applicable for HIV in this context
-      get_data_count("attendees_HBV_positive_diag"),
-      get_data_count("attendees_HCV_positive_diag")
+      NA,  # Diagnosed positive not applicable for Virus1 in this context
+      get_data_count("attendees_V2_positive_diag"),
+      get_data_count("attendees_V3_positive_diag")
     ),
     `Newly Diagnosed` = c(
-      get_data_count("attendees_HIV_new_diag"),
-      get_data_count("attendees_HBV_new_diag"),
-      get_data_count("attendees_HCV_new_diag")
+      get_data_count("attendees_V1_new_diag"),
+      get_data_count("attendees_V2_new_diag"),
+      get_data_count("attendees_V3_new_diag")
     ),
     `Previously Diagnosed (Not in Care)` = c(
-      get_data_count("attendees_HIV_prev_diag"),
-      NA, # No data for HBV
-      NA  # No data for HCV
+      get_data_count("attendees_V1_prev_diag"),
+      NA,  # No data for Virus2
+      NA   # No data for Virus3
     )
   )
-
+  
   # Render the important note
   report_summary_html <- "
-  <p><strong>Important note:</strong> Please treat as <strong>SENSITIVE</strong>, for named individuals or identified post holders only – data include small counts and embargoed data and are not to be shared outside of those intended as recipients of the report. Data for HIV are preliminary and subject to change as further submissions are received from HIV clinics.</p>
+  <p><strong>Important note:</strong> Please treat this report as <strong>SENSITIVE</strong>. The data include small counts and embargoed information that must not be shared beyond authorized recipients. Data for Virus1 are preliminary and subject to change as further submissions are received.</p>
   "
-
+  
   # Add purpose and description of the report
   purpose_text <- "
-  <p>The purpose of this report is to provide sites participating in the emergency department opt-out testing programme with insights on their attendees, equity of testing, and the characteristics of those diagnosed to inform service delivery.</p>
+  <p>The purpose of this report is to provide sites participating in the emergency department opt-out testing programme with insights on their attendees, testing equity, and the characteristics of those diagnosed to inform service delivery.</p>
   <p>This report contains visualisations of the numbers and proportions of attendees, attendees having a blood test, eligible attendees having a bloodborne virus test, and new diagnoses, all broken down by demographics.</p>
   "
-
-  # Add the site-level report header
+  
+  # Add the site-level report header using generic names
   site_header <- sprintf(
     "<h2>Site Level Report Summary for %s as of %s:</h2>",
     params$site_name,
     params$data_date
   )
-
-  # Render the data table
+  
+  # Render the data table as HTML
   table_html <- knitr::kable(
     summary_table,
     format = "html",
     table.attr = "class='table table-bordered'"
   )
-
+  
   # Add summary text below the table
   summary_text <- "
-  <p>These figures represent the total numbers of attendees tested and new diagnoses made, identified in Sentinel surveillance of bloodborne virus testing data. This cascade approach highlights both the testing programme's reach and identifies potential gaps in the care continuum, from initial attendance through to diagnosis and care engagement. The subsequent sections break down each stage of the cascade by key demographics, providing insights to support service optimisation and assess testing equity across the programme.</p>
+  <p>These figures represent the total numbers of attendees tested and new diagnoses made, based on Sentinel surveillance data. This cascade approach highlights both the reach of the testing programme and potential gaps in the care continuum—from initial attendance through to diagnosis and care engagement. The subsequent sections break down each stage by key demographics to support service optimisation and assess testing equity.</p>
   "
-
-  # Combine all sections
+  
+  # Combine all sections into one HTML output
   report_summary_html <- paste(
     report_summary_html,
     purpose_text,
@@ -997,18 +897,18 @@ if (is_sentinel_site) {
     summary_text,
     sep = "\n"
   )
-
+  
   # Output the report summary HTML
   cat(report_summary_html)
-
+  
 } else {
-  # Alternative summary for non-Sentinel Sites
+  # Alternative summary for non-Sentinel Sites using generic text
   alternative_summary_html <- sprintf("<h2>Site Level Report Summary for %s as of %s:</h2>", params$site_name, params$data_date)
   alternative_summary_html <- paste(alternative_summary_html, "
-  <p><strong>Important note:</strong> Please treat as <strong>SENSITIVE</strong>, for named individuals or identified post holders only – data include small counts and embargoed data and are not to be shared outside of those intended as recipients of the report. Data for HIV are preliminary and subject to change as further submissions are received from HIV clinics.</p>
-  <p>Insufficient data available to generate a comprehensive report summary. This report contains insights for sites participating in the emergency department opt-out testing programme to enhance service delivery.</p>
+  <p><strong>Important note:</strong> Please treat this report as <strong>SENSITIVE</strong>. The data include small counts and embargoed information that must not be shared beyond authorized recipients. Data for Virus1 are preliminary and subject to change as further submissions are received.</p>
+  <p>Insufficient data are available to generate a comprehensive report summary. This report nonetheless provides insights for sites participating in the emergency department opt-out testing programme to enhance service delivery.</p>
   ")
-
+  
   cat(alternative_summary_html)
 }
 
@@ -1018,31 +918,31 @@ if (is_sentinel_site) {
 
 ``` {r description-all-bbv-attendees-demographics, echo=FALSE, results='asis'}
 # Display description for attendees demographics plot if data is available
-if (exists("attendees_characteristics_HIV") && nrow(attendees_characteristics_HIV) > 0) {
-  cat("This graph shows the distribution of attendees across different demographic categories: age group, gender, ethnicity, and index of multiple deprivation (IMD) quintile at ", params$site_name, " from the launch of the ED opt-out testing programme to ", params$data_date, ". The overall distribution across all sites is also shown for comparison.")
+if (exists("attendees_characteristics_V1") && nrow(attendees_characteristics_V1) > 0) {
+  cat("This graph shows the distribution of attendees across different demographic categories: age group, gender, ethnicity, and index of multiple deprivation (IMD) quintile at", 
+      params$site_name, 
+      "from the launch of the ED opt-out testing programme to", 
+      params$data_date, 
+      ". The overall distribution across all sites is also shown for comparison.")
 } 
-#else {
-#  cat("Chart not shown as data are not available for 'All Attendees by Demographics'.\n\n")
-#}
 
 ```  
 
 
 ```{r attendees-visual1, echo=FALSE, results='asis'}
 # Plot attendees demographics if data is available
-if (exists("attendees_characteristics_HIV") && nrow(attendees_characteristics_HIV) > 0 && 
-    exists("overall_characteristics_HIV") && nrow(overall_characteristics_HIV) > 0) {
+if (exists("attendees_characteristics_V1") && nrow(attendees_characteristics_V1) > 0 && 
+    exists("overall_characteristics_V1") && nrow(overall_characteristics_V1) > 0) {
   
-  # Generate individual plots for site-specific and overall data
-  p1 <- plot_attendees_demographics(attendees_characteristics_HIV, "HIV", "Site-Specific Attendees by Demographics")
-  p2 <- plot_attendees_demographics(overall_characteristics_HIV, "HIV", "Overall Attendees by Demographics")
+  # Generate individual plots for site-specific and overall data using generic labels
+  p1 <- plot_attendees_demographics(attendees_characteristics_V1, "Virus1", "Site-Specific Attendees by Demographics")
+  p2 <- plot_attendees_demographics(overall_characteristics_V1, "Virus1", "Overall Attendees by Demographics")
   
   # Combine the plots side by side
   gridExtra::grid.arrange(p1, p2, ncol = 2)
 } else {
   cat("<p>Chart not shown as data are not available for plotting demographics.</p>")
 }
-# Run the plot
 
 ```         
 
@@ -1055,25 +955,23 @@ check_non_zero_proportion <- function(data) {
   summarise(data, any_non_zero = any(Proportion_Tested > 0, na.rm = TRUE))$any_non_zero
 }
 
-# Collect data availability
+# Collect data availability for generic viruses
 available_data <- c()
-if (exists("proportions_tested_HIV_1") && nrow(proportions_tested_HIV_1) > 0 && check_non_zero_proportion(proportions_tested_HIV_1)) {
-  available_data <- c(available_data, "HIV")
+if (exists("proportions_tested_V1") && nrow(proportions_tested_V1) > 0 && check_non_zero_proportion(proportions_tested_V1)) {
+  available_data <- c(available_data, "Virus1")
 }
-if (exists("proportions_tested_HBV_1") && nrow(proportions_tested_HBV_1) > 0 && check_non_zero_proportion(proportions_tested_HBV_1)) {
-  available_data <- c(available_data, "HBV")
+if (exists("proportions_tested_V2") && nrow(proportions_tested_V2) > 0 && check_non_zero_proportion(proportions_tested_V2)) {
+  available_data <- c(available_data, "Virus2")
 }
-if (exists("proportions_tested_HCV_1") && nrow(proportions_tested_HCV_1) > 0 && check_non_zero_proportion(proportions_tested_HCV_1)) {
-  available_data <- c(available_data, "HCV")
+if (exists("proportions_tested_V3") && nrow(proportions_tested_V3) > 0 && check_non_zero_proportion(proportions_tested_V3)) {
+  available_data <- c(available_data, "Virus3")
 }
 
 # If there is any available data, display the description
 if (length(available_data) > 0) {
-  cat("This graph shows the proportion of individuals who received a blood test as part of their ED attendance and so were eligible for an opt-out BBV test at ", params$site_name, " ED, by demographic categories. The overall distribution across all sites is also included for reference.\n\n")
-} 
-#else {
- # cat("Chart not shown as data are not available for 'Proportion of BBV Blood Test by Demographics'.\n\n")
-#}
+  cat("This graph shows the proportion of individuals who received a blood test as part of their ED attendance and were therefore eligible for an opt-out bloodborne virus test at", 
+      params$site_name, "ED, by demographic categories. The overall distribution across all sites is also included for reference.\n\n")
+}
 ```  
 
 
@@ -1081,20 +979,20 @@ if (length(available_data) > 0) {
 ``` {r BBV-visual2, echo=FALSE, results='asis'}
 # Plot proportion of attendees with a blood test by demographics if data is available
 
-# Function to check for non-zero proportions in data
+# Function to check for non-zero proportions in data (re-used)
 check_non_zero_proportion <- function(data) {
   summarise(data, any_non_zero = any(Proportion_Tested > 0, na.rm = TRUE))$any_non_zero
 }
 
-# Check data availability
-if (exists("proportions_tested_HIV_1") && exists("overall_proportions_tested_HIV_1") &&
-    nrow(proportions_tested_HIV_1) > 0 && nrow(overall_proportions_tested_HIV_1) > 0 &&
-    check_non_zero_proportion(proportions_tested_HIV_1) && 
-    check_non_zero_proportion(overall_proportions_tested_HIV_1)) {
+# Check data availability for Virus1 (as an example)
+if (exists("proportions_tested_V1") && exists("overall_proportions_tested_V1") &&
+    nrow(proportions_tested_V1) > 0 && nrow(overall_proportions_tested_V1) > 0 &&
+    check_non_zero_proportion(proportions_tested_V1) && 
+    check_non_zero_proportion(overall_proportions_tested_V1)) {
   
-  # Generate individual plots
-  p1 <- plot_proportions_tested(proportions_tested_HIV_1, "HIV", "Site-Specific Proportion Tested")
-  p2 <- plot_proportions_tested(overall_proportions_tested_HIV_1, "HIV", "Overall Proportion Tested")
+  # Generate individual plots using generic labels
+  p1 <- plot_proportions_tested(proportions_tested_V1, "Virus1", "Site-Specific Proportion Tested")
+  p2 <- plot_proportions_tested(overall_proportions_tested_V1, "Virus1", "Overall Proportion Tested")
   
   # Combine the plots side by side
   gridExtra::grid.arrange(p1, p2, ncol = 2)
@@ -1115,25 +1013,25 @@ check_non_zero_proportion <- function(data) {
   summarise(data, any_non_zero = any(Proportion_Tested > 0, na.rm = TRUE))$any_non_zero
 }
 
-# Display description for eligible BBV tests by demographics
+# Display description for eligible bloodborne virus tests by demographics
 available_bbvs <- c()
-if (exists("combined_overall_proportions_eligible_tested_HIV") && nrow(combined_overall_proportions_eligible_tested_HIV) > 0 && check_non_zero_proportion(combined_overall_proportions_eligible_tested_HIV)) {
-  available_bbvs <- c(available_bbvs, "HIV")
+if (exists("combined_overall_proportions_eligible_tested_V1") && nrow(combined_overall_proportions_eligible_tested_V1) > 0 &&
+    check_non_zero_proportion(combined_overall_proportions_eligible_tested_V1)) {
+  available_bbvs <- c(available_bbvs, "Virus1")
 }
-if (exists("combined_overall_proportions_eligible_tested_HBV") && nrow(combined_overall_proportions_eligible_tested_HBV) > 0 && check_non_zero_proportion(combined_overall_proportions_eligible_tested_HBV)) {
-  available_bbvs <- c(available_bbvs, "HBV")
+if (exists("combined_overall_proportions_eligible_tested_V2") && nrow(combined_overall_proportions_eligible_tested_V2) > 0 &&
+    check_non_zero_proportion(combined_overall_proportions_eligible_tested_V2)) {
+  available_bbvs <- c(available_bbvs, "Virus2")
 }
-if (exists("combined_overall_proportions_eligible_tested_HCV") && nrow(combined_overall_proportions_eligible_tested_HCV) > 0 && check_non_zero_proportion(combined_overall_proportions_eligible_tested_HCV)) {
-  available_bbvs <- c(available_bbvs, "HCV")
+if (exists("combined_overall_proportions_eligible_tested_V3") && nrow(combined_overall_proportions_eligible_tested_V3) > 0 &&
+    check_non_zero_proportion(combined_overall_proportions_eligible_tested_V3)) {
+  available_bbvs <- c(available_bbvs, "Virus3")
 }
 
 if (length(available_bbvs) > 0) {
   bbv_string <- paste(available_bbvs, collapse = ", ")
-  cat(sprintf("This graph shows the uptake of testing among those eligible for %s tests across all sites offering site-level comparison with overall distribution.\n\n", bbv_string, params$site_name, params$data_date))
-} 
-#else {
- # cat("Chart not shown as data are not available for 'Proportion of Eligible Attendees with BBV Tests by Demographics'.\n\n")
-#}
+  cat(sprintf("This graph shows the uptake of testing among those eligible for %s tests across all sites, offering site-level comparison with the overall distribution.\n\n", bbv_string))
+}
 
 ```
 
@@ -1144,17 +1042,20 @@ check_non_zero_proportion <- function(data) {
   summarise(data, any_non_zero = any(Proportion_Tested > 0, na.rm = TRUE))$any_non_zero
 }
 
-# Plot proportion of eligible attendees with BBV tests by demographics if data is available
+# Plot the proportion of eligible attendees with bloodborne virus tests by demographics if data is available
 list_of_datasets <- list()
 
-if (exists("combined_overall_proportions_eligible_tested_HIV") && nrow(combined_overall_proportions_eligible_tested_HIV) > 0 && check_non_zero_proportion(combined_overall_proportions_eligible_tested_HIV)) {
-  list_of_datasets[["HIV"]] <- combined_overall_proportions_eligible_tested_HIV %>% mutate(Test_Type = "HIV")
+if (exists("combined_overall_proportions_eligible_tested_V1") && nrow(combined_overall_proportions_eligible_tested_V1) > 0 &&
+    check_non_zero_proportion(combined_overall_proportions_eligible_tested_V1)) {
+  list_of_datasets[["Virus1"]] <- combined_overall_proportions_eligible_tested_V1 %>% mutate(Test_Type = "Virus1")
 }
-if (exists("combined_overall_proportions_eligible_tested_HBV") && nrow(combined_overall_proportions_eligible_tested_HBV) > 0 && check_non_zero_proportion(combined_overall_proportions_eligible_tested_HBV)) {
-  list_of_datasets[["HBV"]] <- combined_overall_proportions_eligible_tested_HBV %>% mutate(Test_Type = "HBV")
+if (exists("combined_overall_proportions_eligible_tested_V2") && nrow(combined_overall_proportions_eligible_tested_V2) > 0 &&
+    check_non_zero_proportion(combined_overall_proportions_eligible_tested_V2)) {
+  list_of_datasets[["Virus2"]] <- combined_overall_proportions_eligible_tested_V2 %>% mutate(Test_Type = "Virus2")
 }
-if (exists("combined_overall_proportions_eligible_tested_HCV") && nrow(combined_overall_proportions_eligible_tested_HCV) > 0 && check_non_zero_proportion(combined_overall_proportions_eligible_tested_HCV)) {
-  list_of_datasets[["HCV"]] <- combined_overall_proportions_eligible_tested_HCV %>% mutate(Test_Type = "HCV")
+if (exists("combined_overall_proportions_eligible_tested_V3") && nrow(combined_overall_proportions_eligible_tested_V3) > 0 &&
+    check_non_zero_proportion(combined_overall_proportions_eligible_tested_V3)) {
+  list_of_datasets[["Virus3"]] <- combined_overall_proportions_eligible_tested_V3 %>% mutate(Test_Type = "Virus3")
 }
 
 num_bbv_available <- length(list_of_datasets)
@@ -1163,7 +1064,7 @@ if (num_bbv_available > 0) {
   combined_all_tests_with_ci <- bind_rows(list_of_datasets)
   
   if (num_bbv_available == 3) {
-    bbv_test_plot_eligible(combined_all_tests_with_ci, "Proportion of Eligible Attendees with BBV Tests by Demographics across all Sites", "Demographic Category", "Percentage Tested", blue_palette)
+    bbv_test_plot_eligible(combined_all_tests_with_ci, "Proportion of Eligible Attendees with Bloodborne Virus Tests by Demographics across all Sites", "Demographic Category", "Percentage Tested", blue_palette)
   } else if (num_bbv_available == 2) {
     bbv_types <- names(list_of_datasets)
     bbv_test_plot_eligible(combined_all_tests_with_ci, sprintf("Proportion of Eligible Attendees with %s and %s Tests by Demographics across all Sites", bbv_types[1], bbv_types[2]), "Demographic Category", "Percentage Tested", blue_palette)
@@ -1172,7 +1073,7 @@ if (num_bbv_available > 0) {
     bbv_test_plot_eligible(combined_all_tests_with_ci, sprintf("Proportion of Eligible Attendees with %s Tests by Demographics across all Sites", bbv_type), "Demographic Category", "Percentage Tested", blue_palette)
   }
 } else {
-  cat("<p>Chart not shown as data are not available for 'Proportion of Eligible Attendees with BBV Tests by Demographics'.</p>")
+  cat("<p>Chart not shown as data are not available for 'Proportion of Eligible Attendees with Bloodborne Virus Tests by Demographics'.</p>")
 }
 ```
 
@@ -1185,26 +1086,25 @@ check_non_zero_proportion <- function(data) {
   summarise(data, any_non_zero = any(Proportion_Tested > 0, na.rm = TRUE))$any_non_zero
 }
 
-# Display description for eligible BBV tests by demographics
+# Display description for eligible bloodborne virus tests by demographics
 available_bbvs <- c()
-if (exists("combined_proportions_eligible_tested_HIV") && nrow(combined_proportions_eligible_tested_HIV) > 0 && check_non_zero_proportion(combined_proportions_eligible_tested_HIV)) {
-  available_bbvs <- c(available_bbvs, "HIV")
+if (exists("combined_proportions_eligible_tested_V1") && nrow(combined_proportions_eligible_tested_V1) > 0 &&
+    check_non_zero_proportion(combined_proportions_eligible_tested_V1)) {
+  available_bbvs <- c(available_bbvs, "Virus1")
 }
-if (exists("combined_proportions_eligible_tested_HBV") && nrow(combined_proportions_eligible_tested_HBV) > 0 && check_non_zero_proportion(combined_proportions_eligible_tested_HBV)) {
-  available_bbvs <- c(available_bbvs, "HBV")
+if (exists("combined_proportions_eligible_tested_V2") && nrow(combined_proportions_eligible_tested_V2) > 0 &&
+    check_non_zero_proportion(combined_proportions_eligible_tested_V2)) {
+  available_bbvs <- c(available_bbvs, "Virus2")
 }
-if (exists("combined_proportions_eligible_tested_HCV") && nrow(combined_proportions_eligible_tested_HCV) > 0 && check_non_zero_proportion(combined_proportions_eligible_tested_HCV)) {
-  available_bbvs <- c(available_bbvs, "HCV")
+if (exists("combined_proportions_eligible_tested_V3") && nrow(combined_proportions_eligible_tested_V3) > 0 &&
+    check_non_zero_proportion(combined_proportions_eligible_tested_V3)) {
+  available_bbvs <- c(available_bbvs, "Virus3")
 }
 
 if (length(available_bbvs) > 0) {
   bbv_string <- paste(available_bbvs, collapse = ", ")
-  cat(sprintf("This graph shows the uptake of testing among those eligible for %s. This helps identify potential disparities in testing rates across different demographic groups as well as illuminating overall testing uptake for each BBV through the Programme at %s as of %s.\n\n", bbv_string, params$site_name, params$data_date))
-} 
-
-#else {
- # cat("Chart not shown as data are not available for 'Proportion of Eligible Attendees with BBV Tests by Demographics'.\n\n")
-#}
+  cat(sprintf("This graph shows the uptake of testing among those eligible for %s tests. This helps identify potential disparities in testing rates across different demographic groups as well as illuminating overall testing uptake for each virus through the Programme at %s as of %s.\n\n", bbv_string, params$site_name, params$data_date))
+}
 
 ```
 
@@ -1215,17 +1115,20 @@ check_non_zero_proportion <- function(data) {
   summarise(data, any_non_zero = any(Proportion_Tested > 0, na.rm = TRUE))$any_non_zero
 }
 
-# Plot proportion of eligible attendees with BBV tests by demographics if data is available
+# Plot proportion of eligible attendees with bloodborne virus tests by demographics if data is available
 list_of_datasets <- list()
 
-if (exists("combined_proportions_eligible_tested_HIV") && nrow(combined_proportions_eligible_tested_HIV) > 0 && check_non_zero_proportion(combined_proportions_eligible_tested_HIV)) {
-  list_of_datasets[["HIV"]] <- combined_proportions_eligible_tested_HIV %>% mutate(Test_Type = "HIV")
+if (exists("combined_proportions_eligible_tested_V1") && nrow(combined_proportions_eligible_tested_V1) > 0 &&
+    check_non_zero_proportion(combined_proportions_eligible_tested_V1)) {
+  list_of_datasets[["Virus1"]] <- combined_proportions_eligible_tested_V1 %>% mutate(Test_Type = "Virus1")
 }
-if (exists("combined_proportions_eligible_tested_HBV") && nrow(combined_proportions_eligible_tested_HBV) > 0 && check_non_zero_proportion(combined_proportions_eligible_tested_HBV)) {
-  list_of_datasets[["HBV"]] <- combined_proportions_eligible_tested_HBV %>% mutate(Test_Type = "HBV")
+if (exists("combined_proportions_eligible_tested_V2") && nrow(combined_proportions_eligible_tested_V2) > 0 &&
+    check_non_zero_proportion(combined_proportions_eligible_tested_V2)) {
+  list_of_datasets[["Virus2"]] <- combined_proportions_eligible_tested_V2 %>% mutate(Test_Type = "Virus2")
 }
-if (exists("combined_proportions_eligible_tested_HCV") && nrow(combined_proportions_eligible_tested_HCV) > 0 && check_non_zero_proportion(combined_proportions_eligible_tested_HCV)) {
-  list_of_datasets[["HCV"]] <- combined_proportions_eligible_tested_HCV %>% mutate(Test_Type = "HCV")
+if (exists("combined_proportions_eligible_tested_V3") && nrow(combined_proportions_eligible_tested_V3) > 0 &&
+    check_non_zero_proportion(combined_proportions_eligible_tested_V3)) {
+  list_of_datasets[["Virus3"]] <- combined_proportions_eligible_tested_V3 %>% mutate(Test_Type = "Virus3")
 }
 
 num_bbv_available <- length(list_of_datasets)
@@ -1234,19 +1137,17 @@ if (num_bbv_available > 0) {
   combined_all_tests_with_ci <- bind_rows(list_of_datasets)
   
   if (num_bbv_available == 3) {
-    # All three BBVs meet criteria - plot combined graph
-    bbv_test_plot_eligible(combined_all_tests_with_ci, "Proportion of Eligible Attendees with BBV Tests by Demographics", "Demographic Category", "Percentage Tested", blue_palette)
+    # All three viruses meet criteria - plot combined graph
+    bbv_test_plot_eligible(combined_all_tests_with_ci, "Proportion of Eligible Attendees with Bloodborne Virus Tests by Demographics across all Sites", "Demographic Category", "Percentage Tested", blue_palette)
   } else if (num_bbv_available == 2) {
-    # Two BBVs meet criteria - plot them together
     bbv_types <- names(list_of_datasets)
-    bbv_test_plot_eligible(combined_all_tests_with_ci, sprintf("Proportion of Eligible Attendees with %s and %s Tests by Demographics", bbv_types[1], bbv_types[2]), "Demographic Category", "Percentage Tested", blue_palette)
+    bbv_test_plot_eligible(combined_all_tests_with_ci, sprintf("Proportion of Eligible Attendees with %s and %s Tests by Demographics across all Sites", bbv_types[1], bbv_types[2]), "Demographic Category", "Percentage Tested", blue_palette)
   } else {
-    # Only one BBV meets criteria - plot it individually
     bbv_type <- names(list_of_datasets)
-    bbv_test_plot_eligible(combined_all_tests_with_ci, sprintf("Proportion of Eligible Attendees with %s Tests by Demographics", bbv_type), "Demographic Category", "Percentage Tested", blue_palette)
+    bbv_test_plot_eligible(combined_all_tests_with_ci, sprintf("Proportion of Eligible Attendees with %s Tests by Demographics across all Sites", bbv_type), "Demographic Category", "Percentage Tested", blue_palette)
   }
 } else {
-  cat("<p>Chart not shown as data are not available for 'Proportion of Eligible Attendees with BBV Tests by Demographics'.</p>")
+  cat("<p>Chart not shown as data are not available for 'Proportion of Eligible Attendees with Bloodborne Virus Tests by Demographics'.</p>")
 }
 
 ```
@@ -1255,41 +1156,59 @@ if (num_bbv_available > 0) {
 \pagebreak 
 
 ```{r description-overall-newly-diagnosed-bbv-by-demographics, echo=FALSE, results='asis'}
-# Display description for overall newly diagnosed BBV cases by demographics
+# Display description for overall newly diagnosed bloodborne virus cases by demographics
 available_bbvs <- c()
 
-if (exists("overall_combined_Proportion_diagnosed_long_HCV") && nrow(overall_combined_Proportion_diagnosed_long_HCV) > 0 && any(!is.na(overall_combined_Proportion_diagnosed_long_HCV$Proportion) & overall_combined_Proportion_diagnosed_long_HCV$Proportion > 0)) {
-  available_bbvs <- c(available_bbvs, "HCV")
+if (exists("overall_combined_Proportion_diagnosed_long_V3") &&
+    nrow(overall_combined_Proportion_diagnosed_long_V3) > 0 &&
+    any(!is.na(overall_combined_Proportion_diagnosed_long_V3$Proportion) &
+        overall_combined_Proportion_diagnosed_long_V3$Proportion > 0)) {
+  available_bbvs <- c(available_bbvs, "Virus3")
 }
-if (exists("overall_combined_Proportion_diagnosed_long_HBV") && nrow(overall_combined_Proportion_diagnosed_long_HBV) > 0 && any(!is.na(overall_combined_Proportion_diagnosed_long_HBV$Proportion) & overall_combined_Proportion_diagnosed_long_HBV$Proportion > 0)) {
-  available_bbvs <- c(available_bbvs, "HBV")
+if (exists("overall_combined_Proportion_diagnosed_long_V2") &&
+    nrow(overall_combined_Proportion_diagnosed_long_V2) > 0 &&
+    any(!is.na(overall_combined_Proportion_diagnosed_long_V2$Proportion) &
+        overall_combined_Proportion_diagnosed_long_V2$Proportion > 0)) {
+  available_bbvs <- c(available_bbvs, "Virus2")
 }
-if (exists("overall_combined_Proportion_diagnosed_long_HIV") && nrow(overall_combined_Proportion_diagnosed_long_HIV) > 0 && any(!is.na(overall_combined_Proportion_diagnosed_long_HIV$Proportion) & overall_combined_Proportion_diagnosed_long_HIV$Proportion > 0)) {
-  available_bbvs <- c(available_bbvs, "HIV")
+if (exists("overall_combined_Proportion_diagnosed_long_V1") &&
+    nrow(overall_combined_Proportion_diagnosed_long_V1) > 0 &&
+    any(!is.na(overall_combined_Proportion_diagnosed_long_V1$Proportion) &
+        overall_combined_Proportion_diagnosed_long_V1$Proportion > 0)) {
+  available_bbvs <- c(available_bbvs, "Virus1")
 }
 
 if (length(available_bbvs) > 0) {
   bbv_string <- paste(available_bbvs, collapse = ", ")
   cat(sprintf("These graphs show the proportion of newly diagnosed patients for %s by demographics across all sites, offering site-level comparison with overall distribution as of %s.\n\n", bbv_string, params$data_date))
 } else {
-  cat("Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics for BBV'.\n\n")
+  cat("Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics for Bloodborne Viruses'.\n\n")
 }
  
 ```
  
  
 ```{r overall-combined-BBV-visualisation, echo=FALSE, results='asis'}
-# Plot proportion of overall newly diagnosed by demographics for BBVs if valid data is available
+# Plot proportion of overall newly diagnosed patients by demographics for bloodborne viruses if valid data is available
 list_of_overall_diagnosed_datasets <- list()
 
-if (exists("overall_combined_Proportion_diagnosed_long_HCV") && nrow(overall_combined_Proportion_diagnosed_long_HCV) > 0 && any(!is.na(overall_combined_Proportion_diagnosed_long_HCV$Proportion) & overall_combined_Proportion_diagnosed_long_HCV$Proportion > 0)) {
-  list_of_overall_diagnosed_datasets[["HCV"]] <- overall_combined_Proportion_diagnosed_long_HCV %>% mutate(Test_Type = "HCV")
+if (exists("overall_combined_Proportion_diagnosed_long_V3") &&
+    nrow(overall_combined_Proportion_diagnosed_long_V3) > 0 &&
+    any(!is.na(overall_combined_Proportion_diagnosed_long_V3$Proportion) &
+        overall_combined_Proportion_diagnosed_long_V3$Proportion > 0)) {
+  list_of_overall_diagnosed_datasets[["Virus3"]] <- overall_combined_Proportion_diagnosed_long_V3 %>% mutate(Test_Type = "Virus3")
 }
-if (exists("overall_combined_Proportion_diagnosed_long_HBV") && nrow(overall_combined_Proportion_diagnosed_long_HBV) > 0 && any(!is.na(overall_combined_Proportion_diagnosed_long_HBV$Proportion) & overall_combined_Proportion_diagnosed_long_HBV$Proportion > 0)) {
-  list_of_overall_diagnosed_datasets[["HBV"]] <- overall_combined_Proportion_diagnosed_long_HBV %>% mutate(Test_Type = "HBV")
+if (exists("overall_combined_Proportion_diagnosed_long_V2") &&
+    nrow(overall_combined_Proportion_diagnosed_long_V2) > 0 &&
+    any(!is.na(overall_combined_Proportion_diagnosed_long_V2$Proportion) &
+        overall_combined_Proportion_diagnosed_long_V2$Proportion > 0)) {
+  list_of_overall_diagnosed_datasets[["Virus2"]] <- overall_combined_Proportion_diagnosed_long_V2 %>% mutate(Test_Type = "Virus2")
 }
-if (exists("overall_combined_Proportion_diagnosed_long_HIV") && nrow(overall_combined_Proportion_diagnosed_long_HIV) > 0 && any(!is.na(overall_combined_Proportion_diagnosed_long_HIV$Proportion) & overall_combined_Proportion_diagnosed_long_HIV$Proportion > 0)) {
-  list_of_overall_diagnosed_datasets[["HIV"]] <- overall_combined_Proportion_diagnosed_long_HIV %>% mutate(Test_Type = "HIV")
+if (exists("overall_combined_Proportion_diagnosed_long_V1") &&
+    nrow(overall_combined_Proportion_diagnosed_long_V1) > 0 &&
+    any(!is.na(overall_combined_Proportion_diagnosed_long_V1$Proportion) &
+        overall_combined_Proportion_diagnosed_long_V1$Proportion > 0)) {
+  list_of_overall_diagnosed_datasets[["Virus1"]] <- overall_combined_Proportion_diagnosed_long_V1 %>% mutate(Test_Type = "Virus1")
 }
 
 num_bbv_available <- length(list_of_overall_diagnosed_datasets)
@@ -1302,7 +1221,7 @@ if (num_bbv_available > 0) {
     cat("<p>No valid data available for plotting.</p>")
   } else {
     if (num_bbv_available == 3) {
-      proportion_diagnosed_plot(valid_data, "Proportion of Newly Diagnosed patients by Demographics across all sites for HBV, HCV, and HIV", "Demographic Category", "Percentage Tested")
+      proportion_diagnosed_plot(valid_data, "Proportion of Newly Diagnosed patients by Demographics across all sites for Virus2, Virus3, and Virus1", "Demographic Category", "Percentage Tested")
     } else if (num_bbv_available == 2) {
       bbv_types <- names(list_of_overall_diagnosed_datasets)
       proportion_diagnosed_plot(valid_data, sprintf("Proportion of Newly Diagnosed patients by Demographics across all sites for %s and %s", bbv_types[1], bbv_types[2]), "Demographic Category", "Percentage Tested")
@@ -1312,7 +1231,7 @@ if (num_bbv_available > 0) {
     }
   }
 } else {
-  cat("<p>Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics across all sites for BBV'.</p>")
+  cat("<p>Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics across all sites for Bloodborne Viruses'.</p>")
 }
 
 ```
@@ -1321,41 +1240,54 @@ if (num_bbv_available > 0) {
 \pagebreak 
 
 ``` {r description-newly-diagnosed-hbv-hcv-hiv-by-demographics, echo=FALSE, results='asis'}
-# Display description for newly diagnosed BBV cases by demographics
+# Display description for newly diagnosed bloodborne virus cases by demographics
 available_bbvs <- c()
 
-if (exists("combined_Proportion_diagnosed_long_HCV") && nrow(combined_Proportion_diagnosed_long_HCV) > 0 && any(!is.na(combined_Proportion_diagnosed_long_HCV$Proportion) & combined_Proportion_diagnosed_long_HCV$Proportion > 0)) {
-  available_bbvs <- c(available_bbvs, "HCV")
+if (exists("combined_Proportion_diagnosed_long_V3") &&
+    nrow(combined_Proportion_diagnosed_long_V3) > 0 &&
+    any(!is.na(combined_Proportion_diagnosed_long_V3$Proportion) & combined_Proportion_diagnosed_long_V3$Proportion > 0)) {
+  available_bbvs <- c(available_bbvs, "Virus3")
 }
-if (exists("combined_Proportion_diagnosed_long_HBV") && nrow(combined_Proportion_diagnosed_long_HBV) > 0 && any(!is.na(combined_Proportion_diagnosed_long_HBV$Proportion) & combined_Proportion_diagnosed_long_HBV$Proportion > 0)) {
-  available_bbvs <- c(available_bbvs, "HBV")
+if (exists("combined_Proportion_diagnosed_long_V2") &&
+    nrow(combined_Proportion_diagnosed_long_V2) > 0 &&
+    any(!is.na(combined_Proportion_diagnosed_long_V2$Proportion) & combined_Proportion_diagnosed_long_V2$Proportion > 0)) {
+  available_bbvs <- c(available_bbvs, "Virus2")
 }
-if (exists("combined_Proportion_diagnosed_long_HIV") && nrow(combined_Proportion_diagnosed_long_HIV) > 0 && any(!is.na(combined_Proportion_diagnosed_long_HIV$Proportion) & combined_Proportion_diagnosed_long_HIV$Proportion > 0)) {
-  available_bbvs <- c(available_bbvs, "HIV")
+if (exists("combined_Proportion_diagnosed_long_V1") &&
+    nrow(combined_Proportion_diagnosed_long_V1) > 0 &&
+    any(!is.na(combined_Proportion_diagnosed_long_V1$Proportion) & combined_Proportion_diagnosed_long_V1$Proportion > 0)) {
+  available_bbvs <- c(available_bbvs, "Virus1")
 }
 
 if (length(available_bbvs) > 0) {
   bbv_string <- paste(available_bbvs, collapse = ", ")
-  cat(sprintf("These graphs show the proportion of newly diagnosed patients for %s by demographics at %s, offering insights into the prevalence of these viruses by demographic groups as of %s.\n\n", bbv_string, params$site_name, params$data_date))
+  cat(sprintf("These graphs show the proportion of newly diagnosed patients for %s by demographics at %s, offering insights into the prevalence of these viruses by demographic groups as of %s.\n\n", 
+              bbv_string, params$site_name, params$data_date))
 } else {
-  cat("Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics for BBV'.\n\n")
+  cat("Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics for Bloodborne Viruses'.\n\n")
 }
  
 ```
  
  
 ```{r combined-BBV-visualisation3, echo=FALSE, results='asis'}
-# Plot proportion of newly diagnosed by demographics for BBVs if valid data is available
+# Plot proportion of overall newly diagnosed patients by demographics for bloodborne viruses if valid data is available
 list_of_diagnosed_datasets <- list()
 
-if (exists("combined_Proportion_diagnosed_long_HCV") && nrow(combined_Proportion_diagnosed_long_HCV) > 0 && any(!is.na(combined_Proportion_diagnosed_long_HCV$Proportion) & combined_Proportion_diagnosed_long_HCV$Proportion > 0)) {
-  list_of_diagnosed_datasets[["HCV"]] <- combined_Proportion_diagnosed_long_HCV %>% mutate(Test_Type = "HCV")
+if (exists("combined_Proportion_diagnosed_long_V3") &&
+    nrow(combined_Proportion_diagnosed_long_V3) > 0 &&
+    any(!is.na(combined_Proportion_diagnosed_long_V3$Proportion) & combined_Proportion_diagnosed_long_V3$Proportion > 0)) {
+  list_of_diagnosed_datasets[["Virus3"]] <- combined_Proportion_diagnosed_long_V3 %>% mutate(Test_Type = "Virus3")
 }
-if (exists("combined_Proportion_diagnosed_long_HBV") && nrow(combined_Proportion_diagnosed_long_HBV) > 0 && any(!is.na(combined_Proportion_diagnosed_long_HBV$Proportion) & combined_Proportion_diagnosed_long_HBV$Proportion > 0)) {
-  list_of_diagnosed_datasets[["HBV"]] <- combined_Proportion_diagnosed_long_HBV %>% mutate(Test_Type = "HBV")
+if (exists("combined_Proportion_diagnosed_long_V2") &&
+    nrow(combined_Proportion_diagnosed_long_V2) > 0 &&
+    any(!is.na(combined_Proportion_diagnosed_long_V2$Proportion) & combined_Proportion_diagnosed_long_V2$Proportion > 0)) {
+  list_of_diagnosed_datasets[["Virus2"]] <- combined_Proportion_diagnosed_long_V2 %>% mutate(Test_Type = "Virus2")
 }
-if (exists("combined_Proportion_diagnosed_long_HIV") && nrow(combined_Proportion_diagnosed_long_HIV) > 0 && any(!is.na(combined_Proportion_diagnosed_long_HIV$Proportion) & combined_Proportion_diagnosed_long_HIV$Proportion > 0)) {
-  list_of_diagnosed_datasets[["HIV"]] <- combined_Proportion_diagnosed_long_HIV %>% mutate(Test_Type = "HIV")
+if (exists("combined_Proportion_diagnosed_long_V1") &&
+    nrow(combined_Proportion_diagnosed_long_V1) > 0 &&
+    any(!is.na(combined_Proportion_diagnosed_long_V1$Proportion) & combined_Proportion_diagnosed_long_V1$Proportion > 0)) {
+  list_of_diagnosed_datasets[["Virus1"]] <- combined_Proportion_diagnosed_long_V1 %>% mutate(Test_Type = "Virus1")
 }
 
 num_bbv_available <- length(list_of_diagnosed_datasets)
@@ -1368,17 +1300,17 @@ if (num_bbv_available > 0) {
     cat("<p>No valid data available for plotting.</p>")
   } else {
     if (num_bbv_available == 3) {
-      proportion_diagnosed_plot(valid_data, "Proportion of Newly Diagnosed patients by Demographics for HBV, HCV, and HIV", "Demographic Category", "Percentage Tested")
+      proportion_diagnosed_plot(valid_data, "Proportion of Newly Diagnosed patients by Demographics across all sites for Virus2, Virus3, and Virus1", "Demographic Category", "Percentage Tested")
     } else if (num_bbv_available == 2) {
       bbv_types <- names(list_of_diagnosed_datasets)
-      proportion_diagnosed_plot(valid_data, sprintf("Proportion of Newly Diagnosed patients by Demographics for %s and %s", bbv_types[1], bbv_types[2]), "Demographic Category", "Percentage Tested")
+      proportion_diagnosed_plot(valid_data, sprintf("Proportion of Newly Diagnosed patients by Demographics across all sites for %s and %s", bbv_types[1], bbv_types[2]), "Demographic Category", "Percentage Tested")
     } else {
       bbv_type <- names(list_of_diagnosed_datasets)
-      proportion_diagnosed_plot(valid_data, sprintf("Proportion of Newly Diagnosed patients by Demographics for %s", bbv_type), "Demographic Category", "Percentage Tested")
+      proportion_diagnosed_plot(valid_data, sprintf("Proportion of Newly Diagnosed patients by Demographics across all sites for %s", bbv_type), "Demographic Category", "Percentage Tested")
     }
   }
 } else {
-  cat("<p>Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics for BBV'.</p>")
+  cat("<p>Chart not shown as data are not available for 'Proportion of Newly Diagnosed patients by Demographics for Bloodborne Viruses'.</p>")
 }
 
 ``` 
@@ -1387,40 +1319,42 @@ if (num_bbv_available > 0) {
 \pagebreak
  
 ``` {r description-newly-diagnosed-bbv-by-demographics, echo=FALSE, results='asis'}
-# Display description for newly diagnosed BBV cases by demographics
+# Display description for newly diagnosed bloodborne virus cases by demographics
 available_bbvs <- c()
-if (exists("attendees_HCV_new_diag_long") && nrow(attendees_HCV_new_diag_long) > 0) {
-  available_bbvs <- c(available_bbvs, "HCV")
+
+if (exists("attendees_V3_new_diag_long") && nrow(attendees_V3_new_diag_long) > 0) {
+  available_bbvs <- c(available_bbvs, "Virus3")
 }
-if (exists("attendees_HBV_new_diag_long") && nrow(attendees_HBV_new_diag_long) > 0) {
-  available_bbvs <- c(available_bbvs, "HBV")
+if (exists("attendees_V2_new_diag_long") && nrow(attendees_V2_new_diag_long) > 0) {
+  available_bbvs <- c(available_bbvs, "Virus2")
 }
-if (exists("attendees_HIV_new_diag_long") && nrow(attendees_HIV_new_diag_long) > 0) {
-  available_bbvs <- c(available_bbvs, "HIV")
+if (exists("attendees_V1_new_diag_long") && nrow(attendees_V1_new_diag_long) > 0) {
+  available_bbvs <- c(available_bbvs, "Virus1")
 }
 
 if (length(available_bbvs) > 0) {
   bbv_string <- paste(available_bbvs, collapse = ", ")
-  cat(sprintf("These graphs show the counts of newly diagnosed patients for %s by demographic groups at %s, as of %s. They highlight the demographic segments witnessing new BBV cases, essential for targeted healthcare strategies.\n\n", bbv_string, params$site_name, params$data_date))
+  cat(sprintf("These graphs show the counts of newly diagnosed patients for %s by demographic groups at %s, as of %s. They highlight the demographic segments witnessing new cases, which is essential for targeted healthcare strategies.\n\n", 
+              bbv_string, params$site_name, params$data_date))
 } else {
-  cat("Chart not shown as data are not available for 'Count of Newly Diagnosed BBV Patients by Demographics'.\n\n")
+  cat("Chart not shown as data are not available for 'Count of Newly Diagnosed Patients by Demographics for Bloodborne Viruses'.\n\n")
 }
 
 ```
  
  
 ```{r combined-BBV-visualisation4, echo=FALSE, results='asis'}
-# Plot number of newly diagnosed BBV patients by demographics if data is available
+# Plot number of newly diagnosed bloodborne virus patients by demographics if data is available
 list_of_new_diag_datasets <- list()
 
-if (exists("attendees_HCV_new_diag_long") && nrow(attendees_HCV_new_diag_long) > 0) {
-  list_of_new_diag_datasets[["HCV"]] <- attendees_HCV_new_diag_long %>% mutate(Test_Type = "HCV")
+if (exists("attendees_V3_new_diag_long") && nrow(attendees_V3_new_diag_long) > 0) {
+  list_of_new_diag_datasets[["Virus3"]] <- attendees_V3_new_diag_long %>% mutate(Test_Type = "Virus3")
 }
-if (exists("attendees_HBV_new_diag_long") && nrow(attendees_HBV_new_diag_long) > 0) {
-  list_of_new_diag_datasets[["HBV"]] <- attendees_HBV_new_diag_long %>% mutate(Test_Type = "HBV")
+if (exists("attendees_V2_new_diag_long") && nrow(attendees_V2_new_diag_long) > 0) {
+  list_of_new_diag_datasets[["Virus2"]] <- attendees_V2_new_diag_long %>% mutate(Test_Type = "Virus2")
 }
-if (exists("attendees_HIV_new_diag_long") && nrow(attendees_HIV_new_diag_long) > 0) {
-  list_of_new_diag_datasets[["HIV"]] <- attendees_HIV_new_diag_long %>% mutate(Test_Type = "HIV")
+if (exists("attendees_V1_new_diag_long") && nrow(attendees_V1_new_diag_long) > 0) {
+  list_of_new_diag_datasets[["Virus1"]] <- attendees_V1_new_diag_long %>% mutate(Test_Type = "Virus1")
 }
 
 num_bbv_available <- length(list_of_new_diag_datasets)
@@ -1428,19 +1362,17 @@ num_bbv_available <- length(list_of_new_diag_datasets)
 if (num_bbv_available > 0) {
   combined_BBV_counts <- bind_rows(list_of_new_diag_datasets)
   if (num_bbv_available == 3) {
-    # All three BBVs meet criteria - plot combined graph
-    plot_new_diag_count(combined_BBV_counts, "Count of Newly Diagnosed HBV, HCV, and HIV Patients by Demographics", "Demographic Category", "Count of New Diagnoses")
+    # All three viruses meet criteria - plot combined graph
+    plot_new_diag_count(combined_BBV_counts, "Count of Newly Diagnosed Virus2, Virus3, and Virus1 Patients by Demographics", "Demographic Category", "Count of New Diagnoses")
   } else if (num_bbv_available == 2) {
-    # Two BBVs meet criteria - plot them together
     bbv_types <- names(list_of_new_diag_datasets)
     plot_new_diag_count(combined_BBV_counts, sprintf("Count of Newly Diagnosed %s and %s Patients by Demographics", bbv_types[1], bbv_types[2]), "Demographic Category", "Count of New Diagnoses")
   } else {
-    # Only one BBV meets criteria - plot it individually
     bbv_type <- names(list_of_new_diag_datasets)
     plot_new_diag_count(combined_BBV_counts, sprintf("Count of Newly Diagnosed %s Patients by Demographics", bbv_type), "Demographic Category", "Count of New Diagnoses")
   }
 } else {
-  cat("<p>Chart not shown as data are not available for 'Count of Newly Diagnosed BBV Patients by Demographics'.</p>")
+  cat("<p>Chart not shown as data are not available for 'Count of Newly Diagnosed Patients by Demographics for Bloodborne Viruses'.</p>")
 }
 
 ```
@@ -1448,64 +1380,64 @@ if (num_bbv_available > 0) {
 \pagebreak
  
 ```{r description-overall-previously-diagnosed-hiv, echo=FALSE, results='asis'}
-# Display description for overall previously diagnosed HIV cases by demographics
-if (exists("overall_attendees_HIV_prev_diag_long") && nrow(overall_attendees_HIV_prev_diag_long) > 0) {
-  cat(sprintf("These graphs show the counts of previously diagnosed patients for HIV and not in care across all sites offering site-level comparison with overall distribution as of %s.\n\n", params$data_date))
+# Display description for overall previously diagnosed Virus1 cases by demographics
+if (exists("overall_attendees_V1_prev_diag_long") && nrow(overall_attendees_V1_prev_diag_long) > 0) {
+  cat(sprintf("These graphs show the counts of previously diagnosed patients for Virus1 (not in care) across all sites, offering site-level comparison with overall distribution as of %s.\n\n", params$data_date))
 } else {
-  cat("Chart not shown as data are not available for 'Count of Overall Previously Diagnosed HIV Patients and not in care by Demographics'.\n\n")
+  cat("Chart not shown as data are not available for 'Count of Overall Previously Diagnosed Virus1 Patients (not in care) by Demographics'.\n\n")
 }
 
 ```
  
  
 ```{r overall-combined-BBV-visualisation5, echo=FALSE, results='asis'}
-# Plot number of overall previously diagnosed HIV patients and not in care by demographics if data is available
-if (exists("overall_attendees_HIV_prev_diag_long") && nrow(overall_attendees_HIV_prev_diag_long) > 0) {
-  combined_overall_BBV_counts <- overall_attendees_HIV_prev_diag_long %>% mutate(Test_Type = "HIV")
-  plot_new_diag_count(combined_overall_BBV_counts, "Count of Previously Diagnosed HIV Patients and not in care by Demographics across all sites", "Demographic Category", "Count of Previously Diagnosed and not in care")
+# Plot number of overall previously diagnosed Virus1 patients (not in care) by demographics if data is available
+if (exists("overall_attendees_V1_prev_diag_long") && nrow(overall_attendees_V1_prev_diag_long) > 0) {
+  combined_overall_BBV_counts <- overall_attendees_V1_prev_diag_long %>% mutate(Test_Type = "Virus1")
+  plot_new_diag_count(combined_overall_BBV_counts, "Count of Previously Diagnosed Virus1 Patients (Not in Care) by Demographics across all Sites", "Demographic Category", "Count of Previously Diagnosed and Not in Care")
 } else {
-  cat("<p>Chart not shown as data are not available for 'Count of Previously Diagnosed HIV Patients and not in care by Demographics across all sites'.</p>")
-} 
-#Run the plot
+  cat("<p>Chart not shown as data are not available for 'Count of Overall Previously Diagnosed Virus1 Patients (Not in Care) by Demographics across all Sites'.</p>")
+}
  
 ```
  
 \pagebreak
  
 ``` {r description-previously-diagnosed-hiv-by-demographics, echo=FALSE, results='asis'}
-# Display description for previously diagnosed HIV cases by demographics
-available_hiv <- c()
-if (exists("attendees_HIV_prev_diag_long") && nrow(attendees_HIV_prev_diag_long) > 0) {
-  available_hiv <- c(available_hiv, "HIV")
+# Display description for previously diagnosed Virus1 cases by demographics
+available_v1 <- c()
+if (exists("attendees_V1_prev_diag_long") && nrow(attendees_V1_prev_diag_long) > 0) {
+  available_v1 <- c(available_v1, "Virus1")
 }
- 
-if (length(available_hiv) > 0) {
-  hiv_string <- paste(available_hiv, collapse = ", ")
-  cat(sprintf("These graphs show the counts of previously diagnosed patients for %s and not in care by demographic groups at %s, as of %s. They highlight gaps in retention to care in demographic segments, essential for targeting reengagement efforts for those may have fallen out of care.\n\n", hiv_string, params$site_name, params$data_date))
+
+if (length(available_v1) > 0) {
+  v1_string <- paste(available_v1, collapse = ", ")
+  cat(sprintf("These graphs show the counts of previously diagnosed patients for %s and not in care by demographic groups at %s, as of %s. They highlight gaps in retention to care in demographic segments, which is essential for targeting reengagement efforts for those who may have fallen out of care.\n\n", 
+              v1_string, params$site_name, params$data_date))
 } else {
-  cat("Chart not shown as data are not available for 'Count of Previously Diagnosed HIV Patient and not in care by Demographics'.\n\n")
+  cat("Chart not shown as data are not available for 'Count of Previously Diagnosed Virus1 Patients and not in care by Demographics'.\n\n")
 }
  
 ```
  
  
 ``` {r combined-BBV-visualisation5, echo=FALSE, results='asis'}
-# Plot number of previously diagnosed HIV patients and not in care by demographics if data is available
+# Plot number of previously diagnosed Virus1 patients and not in care by demographics if data is available
 list_of_prev_diag_datasets <- list()
- 
-if (exists("attendees_HIV_prev_diag_long") && nrow(attendees_HIV_prev_diag_long) > 0) {
-  list_of_prev_diag_datasets[["HIV"]] <- attendees_HIV_prev_diag_long %>% mutate(Test_Type = "HIV")
+
+if (exists("attendees_V1_prev_diag_long") && nrow(attendees_V1_prev_diag_long) > 0) {
+  list_of_prev_diag_datasets[["Virus1"]] <- attendees_V1_prev_diag_long %>% mutate(Test_Type = "Virus1")
 }
- 
-num_bbv_available <- length(list_of_prev_diag_datasets)
- 
-if (num_bbv_available > 0) {
+
+num_v1_available <- length(list_of_prev_diag_datasets)
+
+if (num_v1_available > 0) {
   combined_BBV_counts <- bind_rows(list_of_prev_diag_datasets)
-  # Only one BBV meets criteria - plot it individually
-  bbv_type <- names(list_of_prev_diag_datasets)
-  plot_new_diag_count(combined_BBV_counts, sprintf("Count of Previously Diagnosed %s Patients and not in care by Demographics", bbv_type), "Demographic Category", "Count of Previously Diagnosed and not in care")
+  # Only one virus meets criteria – plot it individually
+  v1_type <- names(list_of_prev_diag_datasets)
+  plot_new_diag_count(combined_BBV_counts, sprintf("Count of Previously Diagnosed %s Patients and not in care by Demographics", v1_type), "Demographic Category", "Count of Previously Diagnosed and not in care")
 } else {
-  cat("<p>Chart not shown as data are not available for 'Count of Previously Diagnosed HIV Patients and not in care by Demographics'.</p>")
+  cat("<p>Chart not shown as data are not available for 'Count of Previously Diagnosed Virus1 Patients and not in care by Demographics'.</p>")
 }
  
 #Run the plot

@@ -1,0 +1,148 @@
+#Install Required Dependencies
+pip install fastapi uvicorn pandas numpy scikit-learn joblib sqlalchemy psycopg2 pydantic twilio
+
+#Train & Save the AI Model
+#Random Forest model trained on health data
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+import joblib
+
+# Load Sample Health Data
+data = pd.read_csv("health_data.csv")  # Sample dataset
+
+# Feature Engineering
+features = ['age', 'bmi', 'blood_pressure', 'smoking_status', 'activity_level']
+X = data[features]
+y = data['heart_disease_risk']  # 1 = High Risk, 0 = Low Risk
+
+# Split the Data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train the Model
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# Evaluate the Model
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Model Accuracy: {accuracy * 100:.2f}%")
+print(classification_report(y_test, y_pred))
+
+# Save the Model
+joblib.dump(model, "disease_risk_model.pkl")
+print("✅ Model Saved Successfully!")
+
+# Create FastAPI Backend
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import joblib
+import pandas as pd
+from sqlalchemy import create_engine, Column, Integer, Float, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import smtplib
+from email.mime.text import MIMEText
+from twilio.rest import Client
+
+# Load Trained Model
+model = joblib.load("disease_risk_model.pkl")
+
+# Initialize FastAPI App
+app = FastAPI()
+
+# PostgreSQL Database Configuration
+DATABASE_URL = "postgresql://username:password@localhost:5432/health_db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+# Define Database Table
+class UserHealthRecord(Base):
+    __tablename__ = "health_records"
+    id = Column(Integer, primary_key=True, index=True)
+    age = Column(Integer)
+    bmi = Column(Float)
+    blood_pressure = Column(Float)
+    smoking_status = Column(Integer)  # 1 = Smoker, 0 = Non-Smoker
+    activity_level = Column(Float)  # Scale 1-10
+    risk_score = Column(Integer)
+
+# Create Tables
+Base.metadata.create_all(bind=engine)
+
+# Define Request Model
+class HealthInput(BaseModel):
+    age: int
+    bmi: float
+    blood_pressure: float
+    smoking_status: int  # 1 for smoker, 0 for non-smoker
+    activity_level: float  # Scale 1-10
+    email: str
+    phone: str
+
+# Email & SMS Notification Functions
+def send_email(email, risk_score):
+    sender_email = "your_email@example.com"
+    password = "your_email_password"
+    subject = "🚨 Health Risk Alert"
+    body = f"Your health risk score is {risk_score}. Please consult a doctor for further advice."
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender_email
+    msg["To"] = email
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(sender_email, password)
+        server.sendmail(sender_email, email, msg.as_string())
+        server.quit()
+        print("✅ Email Sent Successfully!")
+    except Exception as e:
+        print(f"❌ Email Sending Failed: {e}")
+
+def send_sms(phone, risk_score):
+    account_sid = "your_twilio_sid"
+    auth_token = "your_twilio_auth_token"
+    client = Client(account_sid, auth_token)
+    message = client.messages.create(
+        body=f"🚨 Your health risk score is {risk_score}. Please consult a doctor.",
+        from_="+1234567890",
+        to=phone
+    )
+    print(f"✅ SMS Sent Successfully: {message.sid}")
+
+# API Route: Predict Disease Risk
+@app.post("/predict_risk/")
+async def predict_risk(user_input: HealthInput):
+    # Convert Input to DataFrame
+    input_data = pd.DataFrame([user_input.dict()])[['age', 'bmi', 'blood_pressure', 'smoking_status', 'activity_level']]
+    
+    # Make Prediction
+    risk_score = model.predict(input_data)[0]
+
+    # Store in Database
+    session = SessionLocal()
+    new_record = UserHealthRecord(
+        age=user_input.age,
+        bmi=user_input.bmi,
+        blood_pressure=user_input.blood_pressure,
+        smoking_status=user_input.smoking_status,
+        activity_level=user_input.activity_level,
+        risk_score=risk_score
+    )
+    session.add(new_record)
+    session.commit()
+    session.close()
+
+    # Send Alerts for High Risk
+    if risk_score == 1:
+        send_email(user_input.email, risk_score)
+        send_sms(user_input.phone, risk_score)
+
+    return {"risk_score": risk_score, "message": "Prediction Successful!"}
+

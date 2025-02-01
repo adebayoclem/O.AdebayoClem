@@ -1,0 +1,111 @@
+#Install Required Libraries
+pip install pandas sqlalchemy psycopg2 prophet matplotlib seaborn
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sqlalchemy import create_engine
+from prophet import Prophet
+
+# Database Connection
+DATABASE_URL = "postgresql://username:password@localhost:5432/public_health_db"
+engine = create_engine(DATABASE_URL)
+
+# Fetch STI Case Data
+query = """
+SELECT 
+    date_diagnosed, 
+    province, 
+    sti_type, 
+    COUNT(*) AS case_count
+FROM sti_cases
+WHERE date_diagnosed >= CURRENT_DATE - INTERVAL '24 months'
+GROUP BY date_diagnosed, province, sti_type
+ORDER BY date_diagnosed;
+"""
+df = pd.read_sql(query, engine)
+
+# Data Preprocessing
+df['date_diagnosed'] = pd.to_datetime(df['date_diagnosed'])
+df = df.rename(columns={"date_diagnosed": "ds", "case_count": "y"})  # Prophet requires 'ds' & 'y' column names
+
+# STI Forecasting for Each Province
+provinces = df['province'].unique()
+forecast_results = {}
+
+plt.figure(figsize=(14, 6))
+
+for i, province in enumerate(provinces):
+    df_province = df[df['province'] == province]
+    
+    if len(df_province) < 10:  # Skip provinces with insufficient data
+        continue
+
+    model = Prophet()
+    model.fit(df_province[['ds', 'y']])
+    
+    future = model.make_future_dataframe(periods=90)  # Forecast next 3 months
+    forecast = model.predict(future)
+    
+    forecast_results[province] = forecast  # Store forecast for analysis
+    
+    #Visualization for Province
+    plt.subplot(3, 4, i + 1)  # Arrange subplots
+    plt.title(f"STI Prediction in {province}")
+    plt.plot(df_province['ds'], df_province['y'], label="Actual Cases", marker='o')
+    plt.plot(forecast['ds'], forecast['yhat'], label="Predicted Cases", linestyle="dashed")
+    plt.fill_between(forecast['ds'], forecast['yhat_lower'], forecast['yhat_upper'], alpha=0.2)  # Uncertainty range
+    plt.xticks(rotation=45)
+    plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Alert System for Potential Outbreaks
+alerts = []
+email_alerts = []
+
+for province, forecast in forecast_results.items():
+    last_known_case = df[df['province'] == province].iloc[-1]['y']
+    predicted_case = forecast.iloc[-30]['yhat']  # Prediction for 30 days ahead
+    
+    if predicted_case > last_known_case * 1.5:  # If predicted cases rise >50%
+        alert_msg = f"⚠️ OUTBREAK WARNING in {province}: Cases may increase by {round(predicted_case / last_known_case, 2)}x"
+        alerts.append(alert_msg)
+        email_alerts.append(alert_msg)
+
+# Email Notification System
+def send_email_alerts(alert_messages):
+    if not alert_messages:
+        return  # No alerts to send
+
+    sender_email = "your_email@example.com"
+    receiver_email = "publichealth_officer@example.com"  # Replace with the recipient’s email
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 587
+    smtp_username = "your_email@example.com"  # Use your email
+    smtp_password = "your_password"  # Use a secure method (e.g., environment variables)
+
+    # Construct Email
+    subject = "🚨 STI Outbreak Alert - Immediate Attention Required"
+    body = "\n".join(alert_messages)
+
+    msg = MIMEMultipart()
+    msg["From"] = sender_email
+    msg["To"] = receiver_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    # Send Email
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.sendmail(sender_email, receiver_email, msg.as_string())
+        server.quit()
+        print("✅ Email Alert Sent Successfully!")
+    except Exception as e:
+        print(f"❌ Failed to Send Email: {e}")
+
+# Send Alerts if Necessary
+send_email_alerts(email_alerts)
